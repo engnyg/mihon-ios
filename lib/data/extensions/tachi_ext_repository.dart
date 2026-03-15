@@ -142,19 +142,56 @@ class TachiExtRepository {
     for (final item in list) {
       if (item is! Map<String, dynamic>) continue;
       try {
-        defs.add(TachiExtDef.fromJson(item));
+        final def = TachiExtDef.fromJson(item);
+        if (def.id.isNotEmpty && def.baseUrl.isNotEmpty) {
+          // Native Tachimanga JSON format
+          defs.add(def);
+        } else if (item.containsKey('pkg')) {
+          // Keiyoushi format: extract from sources[]
+          _parseKeiyoushiItem(item, defs);
+        }
       } catch (_) {
-        // skip malformed entries
+        if (item.containsKey('pkg')) {
+          try {
+            _parseKeiyoushiItem(item, defs);
+          } catch (_) {}
+        }
       }
     }
     return defs;
   }
 
+  void _parseKeiyoushiItem(
+      Map<String, dynamic> item, List<TachiExtDef> out) {
+    final sources = item['sources'];
+    if (sources is! List || sources.isEmpty) return;
+    final version = item['version']?.toString() ?? '1.0';
+    final nsfw =
+        item['nsfw'] is int ? (item['nsfw'] as int) != 0 : false;
+    for (final src in sources) {
+      if (src is! Map<String, dynamic>) continue;
+      final srcId = src['id']?.toString() ?? '';
+      final srcName =
+          src['name'] as String? ?? item['name'] as String? ?? '';
+      final srcLang =
+          src['lang'] as String? ?? item['lang'] as String? ?? 'en';
+      final srcBase = src['baseUrl'] as String? ?? '';
+      if (srcId.isEmpty || srcBase.isEmpty) continue;
+      out.add(TachiExtDef(
+        id: srcId,
+        name: srcName,
+        lang: srcLang,
+        baseUrl: srcBase,
+        version: version,
+        nsfw: nsfw,
+      ));
+    }
+  }
+
   /// Validates a repo URL. Returns the number of extensions found.
-  /// Throws on network error or invalid format.
+  /// Throws on network error or non-array response.
   Future<int> validateRepoUrl(String url) async {
     final defs = await _fetchDefsFromUrl(url);
-    if (defs.isEmpty) throw Exception('No valid extension definitions found');
     return defs.length;
   }
 

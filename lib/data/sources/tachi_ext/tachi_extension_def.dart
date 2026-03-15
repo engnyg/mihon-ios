@@ -95,7 +95,7 @@ class TachiExtDef {
         lang: j['lang'] as String? ?? 'en',
         baseUrl: (j['baseUrl'] as String? ?? '').replaceAll(RegExp(r'/$'), ''),
         version: j['version']?.toString() ?? '1.0',
-        nsfw: (j['nsfw'] as bool?) ?? (j['nsfw'] as int?) == 1,
+        nsfw: _parseBool(j['nsfw']),
         popularMangaUrl: j['popularMangaUrl'] as String?,
         latestMangaUrl: j['latestMangaUrl'] as String?,
         searchMangaUrl: j['searchMangaUrl'] as String?,
@@ -152,6 +152,12 @@ class TachiExtDef {
       };
 
   String toJsonString() => jsonEncode(toJson());
+
+  static bool _parseBool(dynamic v) {
+    if (v is bool) return v;
+    if (v is int) return v != 0;
+    return false;
+  }
 
   @override
   String toString() => 'TachiExtDef($id, $name, $lang)';
