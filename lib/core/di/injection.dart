@@ -1,6 +1,7 @@
 import 'package:get_it/get_it.dart';
 
 import '../../data/database/app_database.dart';
+import '../../data/extensions/extension_repository.dart';
 import '../../data/repositories/chapter_repository_impl.dart';
 import '../../data/repositories/history_repository_impl.dart';
 import '../../data/repositories/manga_repository_impl.dart';
@@ -25,4 +26,7 @@ Future<void> configureDependencies() async {
   getIt.registerSingleton<HistoryRepository>(
     HistoryRepositoryImpl(db.historyDao),
   );
+
+  // Extensions
+  getIt.registerSingleton<ExtensionRepository>(ExtensionRepository());
 }

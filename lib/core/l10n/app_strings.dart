@@ -19,9 +19,19 @@ abstract class AppStrings {
 
   // Browse
   String get sources;
+  String get extensions;
   String get popular;
   String get latest;
   String get search;
+
+  // Extensions
+  String get installed;
+  String get install;
+  String get uninstall;
+  String get builtIn;
+  String get extensionsNsfw;
+  String get loadingExtensions;
+  String get failedToLoadExtensions;
 
   // Updates
   String get noUpdatesYet;
@@ -106,9 +116,18 @@ class _EnStrings extends AppStrings {
   @override String get filtersComingSoon => 'Filters coming soon';
 
   @override String get sources => 'Sources';
+  @override String get extensions => 'Extensions';
   @override String get popular => 'Popular';
   @override String get latest => 'Latest';
   @override String get search => 'Search...';
+
+  @override String get installed => 'Installed';
+  @override String get install => 'Install';
+  @override String get uninstall => 'Uninstall';
+  @override String get builtIn => 'Built-in';
+  @override String get extensionsNsfw => 'NSFW';
+  @override String get loadingExtensions => 'Loading extensions...';
+  @override String get failedToLoadExtensions => 'Failed to load extensions';
 
   @override String get noUpdatesYet => 'No updates yet';
 
@@ -171,9 +190,18 @@ class _ZhTwStrings extends AppStrings {
   @override String get filtersComingSoon => '篩選功能即將推出';
 
   @override String get sources => '來源';
+  @override String get extensions => '擴充功能';
   @override String get popular => '熱門';
   @override String get latest => '最新';
   @override String get search => '搜尋…';
+
+  @override String get installed => '已安裝';
+  @override String get install => '安裝';
+  @override String get uninstall => '解除安裝';
+  @override String get builtIn => '內建';
+  @override String get extensionsNsfw => '成人內容';
+  @override String get loadingExtensions => '載入擴充功能中…';
+  @override String get failedToLoadExtensions => '無法載入擴充功能';
 
   @override String get noUpdatesYet => '暫無更新';
 

@@ -5,23 +5,47 @@ import '../../core/l10n/app_strings.dart';
 import '../../data/sources/source_registry.dart';
 import '../../data/sources/base/manga_source.dart';
 import '../router/app_router.dart';
+import 'extensions_screen.dart';
 
 class BrowseScreen extends StatelessWidget {
   const BrowseScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final sources = SourceRegistry.instance.allSources;
-
-    return Scaffold(
-      appBar: AppBar(title: Text(l10n.browse)),
-      body: ListView(
-        children: [
-          _SectionHeader(title: l10n.sources),
-          ...sources.map((source) => _SourceTile(source: source)),
-        ],
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(context.l10n.browse),
+          bottom: TabBar(
+            tabs: [
+              Tab(text: context.l10n.sources),
+              Tab(text: context.l10n.extensions),
+            ],
+          ),
+        ),
+        body: const TabBarView(
+          children: [
+            _SourcesTab(),
+            ExtensionsScreen(),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _SourcesTab extends StatelessWidget {
+  const _SourcesTab();
+
+  @override
+  Widget build(BuildContext context) {
+    final sources = SourceRegistry.instance.allSources;
+    return ListView(
+      children: [
+        _SectionHeader(title: context.l10n.sources),
+        ...sources.map((source) => _SourceTile(source: source)),
+      ],
     );
   }
 }
