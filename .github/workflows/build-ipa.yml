@@ -42,24 +42,49 @@ jobs:
             "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" \
             ios/Runner/Info.plist
 
+      - name: Disable code signing in Xcode project
+        run: |
+          # Strip all code signing requirements so xcodebuild works without a team
+          sed -i '' \
+            's/CODE_SIGN_IDENTITY = "iPhone Developer"/CODE_SIGN_IDENTITY = ""/g' \
+            ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' \
+            's/CODE_SIGN_IDENTITY = "iPhone Distribution"/CODE_SIGN_IDENTITY = ""/g' \
+            ios/Runner.xcodeproj/project.pbxproj
+          # Add CODE_SIGNING_REQUIRED = NO and DEVELOPMENT_TEAM = "" via xcconfig
+          cat >> ios/Flutter/Release.xcconfig << 'EOF'
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+          CODE_SIGN_IDENTITY=
+          DEVELOPMENT_TEAM=
+          EOF
+          cat >> ios/Flutter/Debug.xcconfig << 'EOF'
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+          CODE_SIGN_IDENTITY=
+          DEVELOPMENT_TEAM=
+          EOF
+
       - name: Install CocoaPods
         run: |
           cd ios
           pod install --repo-update
 
-      - name: Build IPA (unsigned — installable via AltStore/Sideloadly)
-        run: flutter build ipa --no-codesign --release
+      - name: Build iOS app (no code signing)
+        run: |
+          flutter build ios --no-codesign --release
+
+      - name: Package as IPA
+        run: |
+          mkdir -p build/ios/ipa/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -r mihon-ios-unsigned.ipa Payload/
+          echo "IPA created: $(ls -lh mihon-ios-unsigned.ipa)"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: mihon-ios-unsigned
-          path: build/ios/ipa/*.ipa
-          retention-days: 30
-
-      - name: Upload dSYM for crash reporting
-        uses: actions/upload-artifact@v4
-        with:
-          name: mihon-ios-dsym
-          path: build/ios/archive/Runner.xcarchive/dSYMs/
+          path: build/ios/ipa/mihon-ios-unsigned.ipa
           retention-days: 30
