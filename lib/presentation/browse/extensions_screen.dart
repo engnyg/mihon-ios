@@ -260,8 +260,7 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
     const priority = ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'pt'];
     final sortedLangs = [
       ...priority.where(allLangs.contains),
-      ...allLangs.where((l) => !priority.contains(l) && l != 'all')..toList()
-        ..sort(),
+      ...(allLangs.where((l) => !priority.contains(l) && l != 'all').toList()..sort()),
       if (allLangs.contains('all')) 'all',
     ];
 
