@@ -653,13 +653,32 @@ class _JsonExtSheetState extends ConsumerState<_JsonExtSheet> {
       _loading = true;
     });
     try {
-      await ref.read(tachiExtListProvider.notifier).installFromUrl(url);
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(l10n.jsonExtInstalled),
-          behavior: SnackBarBehavior.floating,
-        ));
+      final repo = ref.read(tachiExtRepoProvider);
+      // Try single-extension install first.
+      // If the URL returns an array (repo index), fall back to adding as repo.
+      try {
+        final def = await repo.validateUrl(url);
+        await ref.read(tachiExtListProvider.notifier).install(def);
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(l10n.jsonExtInstalled),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+      } catch (_) {
+        // URL is an array (repo index) — add as repo instead.
+        final count = await repo.validateRepoUrl(url);
+        final name = Uri.parse(url).host;
+        await ref.read(_tachiRepoListProvider.notifier).add(url, name);
+        ref.invalidate(_tachiExtBrowseProvider);
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${l10n.addRepository}: $count ${l10n.extensions}'),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
       }
     } catch (e) {
       if (mounted) {
