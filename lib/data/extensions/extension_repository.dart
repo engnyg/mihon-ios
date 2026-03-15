@@ -124,12 +124,29 @@ class ExtensionRepository {
   Future<RepoExtensions> _fetchRepo(
       ExtensionRepo repo, Set<String> installed) async {
     try {
-      final response = await _dio.get<List<dynamic>>(repo.url);
-      final data = response.data ?? [];
-      final exts = data.map((e) {
-        final ext = Extension.fromJson(e as Map<String, dynamic>);
-        return ext.copyWith(installed: installed.contains(ext.pkg));
-      }).toList();
+      final response = await _dio.get<dynamic>(repo.url);
+      final raw = response.data;
+
+      // GitHub raw serves text/plain; Dio may return String instead of List.
+      List<dynamic> data;
+      if (raw is List) {
+        data = raw;
+      } else if (raw is String) {
+        data = jsonDecode(raw) as List<dynamic>;
+      } else {
+        return RepoExtensions(repo: repo, extensions: []);
+      }
+
+      final exts = <Extension>[];
+      for (final item in data) {
+        if (item is! Map<String, dynamic>) continue;
+        try {
+          final ext = Extension.fromJson(item);
+          exts.add(ext.copyWith(installed: installed.contains(ext.pkg)));
+        } catch (_) {
+          // Skip malformed entries, continue with the rest
+        }
+      }
       return RepoExtensions(repo: repo, extensions: exts);
     } catch (_) {
       return RepoExtensions(repo: repo, extensions: []);
@@ -139,9 +156,11 @@ class ExtensionRepository {
   /// Validates a repo URL by fetching it. Returns the number of extensions
   /// found, or throws if the URL is invalid / returns non-array JSON.
   Future<int> validateRepoUrl(String url) async {
-    final response = await _dio.get<List<dynamic>>(url);
-    final data = response.data;
-    if (data == null) throw Exception('Empty response');
+    final response = await _dio.get<dynamic>(url);
+    final raw = response.data;
+    if (raw == null) throw Exception('Empty response');
+    final List<dynamic> data =
+        raw is List ? raw : jsonDecode(raw as String) as List<dynamic>;
     return data.length;
   }
 
