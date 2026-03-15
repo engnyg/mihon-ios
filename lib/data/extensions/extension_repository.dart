@@ -23,17 +23,24 @@ class ExtensionRepo {
 
   factory ExtensionRepo.fromJson(Map<String, dynamic> j) =>
       ExtensionRepo(url: j['url'] as String, name: j['name'] as String);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ExtensionRepo && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
 }
 
-/// Extension bundled with the repo it came from.
-class ExtensionEntry {
-  const ExtensionEntry({required this.extension, required this.repo});
-  final Extension extension;
+/// Extensions grouped by source repo.
+class RepoExtensions {
+  const RepoExtensions({required this.repo, required this.extensions});
   final ExtensionRepo repo;
+  final List<Extension> extensions;
 }
 
 /// Fetches extension catalogues (default + user-added repos) and tracks
-/// which extensions are "installed" (enabled) locally.
+/// which extensions are installed locally.
 class ExtensionRepository {
   static const _defaultUrl =
       'https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json';
@@ -71,7 +78,7 @@ class ExtensionRepository {
   Future<void> addCustomRepo(String url, String name) async {
     final prefs = await SharedPreferences.getInstance();
     final repos = _loadCustomRepos(prefs);
-    if (repos.any((r) => r.url == url)) return; // already exists
+    if (repos.any((r) => r.url == url)) return;
     repos.add(ExtensionRepo(url: url, name: name));
     await prefs.setString(
         _customReposKey, jsonEncode(repos.map((r) => r.toJson()).toList()));
@@ -98,58 +105,44 @@ class ExtensionRepository {
 
   // ── Index ────────────────────────────────────────────────────────────────────
 
-  /// Fetches all repos and returns a merged list tagged with their source repo.
-  Future<List<ExtensionEntry>> fetchAllExtensions() async {
+  /// Fetches all repos and returns extensions grouped by repo.
+  /// Each repo's extensions are independent — no de-duplication across repos,
+  /// so custom repos always show their full content.
+  Future<List<RepoExtensions>> fetchGrouped() async {
     final prefs = await SharedPreferences.getInstance();
     final installed = _loadInstalled(prefs);
     final repos = [defaultRepo, ..._loadCustomRepos(prefs)];
 
     final results = await Future.wait(
-      repos.map((repo) => _fetchRepoExtensions(repo, installed)),
+      repos.map((repo) => _fetchRepo(repo, installed)),
     );
 
-    // Merge: de-duplicate by pkg (later repos override earlier ones)
-    final seen = <String>{};
-    final merged = <ExtensionEntry>[];
-    for (final batch in results) {
-      for (final entry in batch) {
-        if (!seen.contains(entry.extension.pkg)) {
-          seen.add(entry.extension.pkg);
-          merged.add(entry);
-        }
-      }
-    }
-    return merged;
+    // Only include repos that returned at least one extension.
+    return results.where((r) => r.extensions.isNotEmpty).toList();
   }
 
-  Future<List<ExtensionEntry>> _fetchRepoExtensions(
-    ExtensionRepo repo,
-    Set<String> installed,
-  ) async {
+  Future<RepoExtensions> _fetchRepo(
+      ExtensionRepo repo, Set<String> installed) async {
     try {
       final response = await _dio.get<List<dynamic>>(repo.url);
       final data = response.data ?? [];
-      return data.map((e) {
-        final ext = Extension.fromJson(e as Map<String, dynamic>)
-            .copyWith(installed: installed.contains(
-                (e as Map<String, dynamic>)['pkg'] as String? ?? ''));
-        return ExtensionEntry(extension: ext, repo: repo);
+      final exts = data.map((e) {
+        final ext = Extension.fromJson(e as Map<String, dynamic>);
+        return ext.copyWith(installed: installed.contains(ext.pkg));
       }).toList();
+      return RepoExtensions(repo: repo, extensions: exts);
     } catch (_) {
-      return [];
+      return RepoExtensions(repo: repo, extensions: []);
     }
   }
 
-  /// Legacy: fetches only the default repo. Used internally.
-  Future<List<Extension>> fetchIndex() async {
-    final prefs = await SharedPreferences.getInstance();
-    final installed = _loadInstalled(prefs);
-    final response = await _dio.get<List<dynamic>>(_defaultUrl);
-    final data = response.data ?? [];
-    return data.map((e) {
-      final ext = Extension.fromJson(e as Map<String, dynamic>);
-      return ext.copyWith(installed: installed.contains(ext.pkg));
-    }).toList();
+  /// Validates a repo URL by fetching it. Returns the number of extensions
+  /// found, or throws if the URL is invalid / returns non-array JSON.
+  Future<int> validateRepoUrl(String url) async {
+    final response = await _dio.get<List<dynamic>>(url);
+    final data = response.data;
+    if (data == null) throw Exception('Empty response');
+    return data.length;
   }
 
   // ── Install / Uninstall ───────────────────────────────────────────────────────
@@ -164,11 +157,6 @@ class ExtensionRepository {
     final prefs = await SharedPreferences.getInstance();
     final installed = _loadInstalled(prefs)..remove(pkg);
     await prefs.setString(_installedKey, jsonEncode(installed.toList()));
-  }
-
-  Future<bool> isInstalled(String pkg) async {
-    final prefs = await SharedPreferences.getInstance();
-    return _loadInstalled(prefs).contains(pkg);
   }
 
   Future<Set<String>> getInstalledSet() async {

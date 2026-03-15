@@ -11,16 +11,15 @@ final _extensionRepoProvider = Provider<ExtensionRepository>(
   (ref) => ExtensionRepository(),
 );
 
-/// All extensions from all repos (default + custom).
+/// Extensions grouped by repo. Rebuilds whenever _repoListProvider changes.
 final extensionListProvider =
-    FutureProvider<List<ExtensionEntry>>((ref) async {
+    FutureProvider<List<RepoExtensions>>((ref) async {
   final repo = ref.watch(_extensionRepoProvider);
-  // Depend on repo list changes so we re-fetch when repos change.
-  ref.watch(_repoListProvider);
-  return repo.fetchAllExtensions();
+  ref.watch(_repoListProvider); // invalidate when repos change
+  return repo.fetchGrouped();
 });
 
-/// List of repos (default + custom).
+/// List of repos (default + custom). Persisted in SharedPreferences.
 final _repoListProvider =
     StateNotifierProvider<_RepoListNotifier, List<ExtensionRepo>>(
   (ref) => _RepoListNotifier(ref.watch(_extensionRepoProvider)),
@@ -49,7 +48,7 @@ class _RepoListNotifier extends StateNotifier<List<ExtensionRepo>> {
   }
 }
 
-/// Installed package set, persisted in SharedPreferences.
+/// Installed package IDs.
 final _installedPkgsProvider =
     StateNotifierProvider<_InstalledNotifier, Set<String>>(
   (ref) => _InstalledNotifier(ref.watch(_extensionRepoProvider)),
@@ -70,7 +69,7 @@ class _InstalledNotifier extends StateNotifier<Set<String>> {
   Future<void> toggle(String pkg) async {
     if (state.contains(pkg)) {
       await _repo.uninstall(pkg);
-      state = {...state}..remove(pkg);
+      state = Set.from(state)..remove(pkg);
     } else {
       await _repo.install(pkg);
       state = {...state, pkg};
@@ -104,9 +103,7 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
     super.dispose();
   }
 
-  // ── Manage repos sheet ──────────────────────────────────────────────────────
-
-  void _showManageRepos(BuildContext context) {
+  void _showManageRepos() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -125,7 +122,6 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
 
     return Column(
       children: [
-        // ── Tab bar + manage repos button ──────────────────────────────────
         Row(
           children: [
             Expanded(
@@ -140,11 +136,10 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
             IconButton(
               icon: const Icon(Icons.tune),
               tooltip: l10n.manageRepos,
-              onPressed: () => _showManageRepos(context),
+              onPressed: _showManageRepos,
             ),
           ],
         ),
-        // ── Search bar ────────────────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: TextField(
@@ -164,7 +159,6 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
           ),
         ),
         const SizedBox(height: 4),
-        // ── Extension list ────────────────────────────────────────────────
         Expanded(
           child: listAsync.when(
             loading: () => Center(child: Text(l10n.loadingExtensions)),
@@ -181,7 +175,7 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
                 ],
               ),
             ),
-            data: (entries) => _buildTabs(context, entries, installed),
+            data: (groups) => _buildTabs(context, groups, installed),
           ),
         ),
       ],
@@ -190,60 +184,65 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
 
   Widget _buildTabs(
     BuildContext context,
-    List<ExtensionEntry> entries,
+    List<RepoExtensions> groups,
     Set<String> installed,
   ) {
     final nativePkgs = ExtensionRepository.nativePackages;
+    final q = _query;
 
-    // Built-in native sources as pseudo-extension entries
-    final nativeEntries = nativePkgs.map((pkg) {
-      final ext = Extension(
-        name: _pkgToName(pkg),
-        pkg: pkg,
-        apk: '',
-        lang: _pkgToLang(pkg),
-        code: 0,
-        version: 'built-in',
-        installed: true,
-      );
-      return ExtensionEntry(
-        extension: ext,
-        repo: ExtensionRepository.defaultRepo,
-      );
-    }).toList();
-
-    final catalogEntries =
-        entries.where((e) => !nativePkgs.contains(e.extension.pkg)).toList();
-
-    List<ExtensionEntry> filter(List<ExtensionEntry> list) {
-      if (_query.isEmpty) return list;
-      return list
-          .where((e) =>
-              e.extension.name.toLowerCase().contains(_query) ||
-              e.extension.lang.toLowerCase().contains(_query) ||
-              e.repo.name.toLowerCase().contains(_query))
-          .toList();
+    bool matchesQuery(Extension e) {
+      if (q.isEmpty) return true;
+      return e.name.toLowerCase().contains(q) ||
+          e.lang.toLowerCase().contains(q);
     }
+
+    // ── Installed tab: native built-ins + user-installed entries ──────────────
+    final nativeItems = nativePkgs.map((pkg) => _ExtItem(
+          ext: Extension(
+            name: _pkgToName(pkg),
+            pkg: pkg,
+            apk: '',
+            lang: _pkgToLang(pkg),
+            code: 0,
+            version: 'built-in',
+            installed: true,
+          ),
+          repoName: null,
+          isNative: true,
+        ));
+
+    final installedItems = groups
+        .expand((g) => g.extensions.where((e) =>
+            !nativePkgs.contains(e.pkg) &&
+            installed.contains(e.pkg) &&
+            matchesQuery(e)))
+        .map((e) => _ExtItem(ext: e, repoName: null, isNative: false));
+
+    final installedFiltered = [
+      ...nativeItems.where((i) => matchesQuery(i.ext)),
+      ...installedItems,
+    ];
+
+    // ── Browse tab: all repos, grouped by repo ────────────────────────────────
+    final browseGroups = groups.map((g) {
+      final filtered = g.extensions
+          .where((e) => !nativePkgs.contains(e.pkg) && matchesQuery(e))
+          .toList();
+      return _RepoGroup(repo: g.repo, extensions: filtered);
+    }).where((g) => g.extensions.isNotEmpty).toList();
 
     return TabBarView(
       controller: _tabController,
       children: [
-        // ── Installed tab ──────────────────────────────────────────────────
-        _ExtensionList(
-          entries: filter([
-            ...nativeEntries,
-            ...catalogEntries.where((e) => installed.contains(e.extension.pkg)),
-          ]),
+        _InstalledList(
+          items: installedFiltered,
           installed: installed,
-          nativePkgs: nativePkgs,
           onToggle: (pkg) =>
               ref.read(_installedPkgsProvider.notifier).toggle(pkg),
         ),
-        // ── Browse tab ─────────────────────────────────────────────────────
-        _ExtensionList(
-          entries: filter(catalogEntries),
+        _BrowseList(
+          groups: browseGroups,
           installed: installed,
-          nativePkgs: nativePkgs,
           onToggle: (pkg) =>
               ref.read(_installedPkgsProvider.notifier).toggle(pkg),
         ),
@@ -252,19 +251,259 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
   }
 
   String _pkgToName(String pkg) {
-    final parts = pkg.split('.');
-    final raw = parts.last;
+    final raw = pkg.split('.').last;
     return raw[0].toUpperCase() + raw.substring(1);
   }
 
   String _pkgToLang(String pkg) {
     final parts = pkg.split('.');
-    if (parts.length >= 6) return parts[parts.length - 2];
-    return 'en';
+    return parts.length >= 6 ? parts[parts.length - 2] : 'en';
   }
 }
 
-// ── Manage Repositories Sheet ───────────────────────────────────────────────────
+// ── Data helpers ─────────────────────────────────────────────────────────────────
+
+class _ExtItem {
+  const _ExtItem(
+      {required this.ext, required this.repoName, required this.isNative});
+  final Extension ext;
+  final String? repoName;
+  final bool isNative;
+}
+
+class _RepoGroup {
+  const _RepoGroup({required this.repo, required this.extensions});
+  final ExtensionRepo repo;
+  final List<Extension> extensions;
+}
+
+// ── Installed Tab ────────────────────────────────────────────────────────────────
+
+class _InstalledList extends StatelessWidget {
+  const _InstalledList(
+      {required this.items,
+      required this.installed,
+      required this.onToggle});
+
+  final List<_ExtItem> items;
+  final Set<String> installed;
+  final void Function(String) onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return _EmptyState(icon: Icons.extension_off, label: context.l10n.installed);
+    }
+    return ListView.builder(
+      itemCount: items.length,
+      itemBuilder: (_, i) => _Tile(
+        ext: items[i].ext,
+        repoName: items[i].repoName,
+        isInstalled: installed.contains(items[i].ext.pkg) || items[i].ext.installed,
+        isNative: items[i].isNative,
+        onToggle: () => onToggle(items[i].ext.pkg),
+      ),
+    );
+  }
+}
+
+// ── Browse Tab (grouped) ─────────────────────────────────────────────────────────
+
+class _BrowseList extends StatelessWidget {
+  const _BrowseList(
+      {required this.groups,
+      required this.installed,
+      required this.onToggle});
+
+  final List<_RepoGroup> groups;
+  final Set<String> installed;
+  final void Function(String) onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    if (groups.isEmpty) {
+      return _EmptyState(icon: Icons.cloud_off, label: context.l10n.browse);
+    }
+
+    // Build a flat list with section headers
+    final items = <Widget>[];
+    for (final group in groups) {
+      items.add(_SectionHeader(
+        repo: group.repo,
+        count: group.extensions.length,
+      ));
+      for (final ext in group.extensions) {
+        items.add(_Tile(
+          ext: ext,
+          repoName: group.repo.isDefault ? null : group.repo.name,
+          isInstalled: installed.contains(ext.pkg) || ext.installed,
+          isNative: ExtensionRepository.nativePackages.contains(ext.pkg),
+          onToggle: () => onToggle(ext.pkg),
+        ));
+      }
+    }
+
+    return ListView(children: items);
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.repo, required this.count});
+  final ExtensionRepo repo;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Row(
+        children: [
+          Icon(
+            repo.isDefault ? Icons.star_rounded : Icons.extension,
+            size: 16,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            repo.name,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '($count)',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Extension Tile ───────────────────────────────────────────────────────────────
+
+class _Tile extends StatelessWidget {
+  const _Tile({
+    required this.ext,
+    required this.repoName,
+    required this.isInstalled,
+    required this.isNative,
+    required this.onToggle,
+  });
+
+  final Extension ext;
+  final String? repoName;
+  final bool isInstalled;
+  final bool isNative;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final cs = Theme.of(context).colorScheme;
+
+    return ListTile(
+      leading: _Icon(name: ext.name),
+      title: Row(
+        children: [
+          Flexible(child: Text(ext.name, overflow: TextOverflow.ellipsis)),
+          const SizedBox(width: 4),
+          if (ext.nsfw != 0)
+            _Chip(ext.nsfw != 0 ? l10n.extensionsNsfw : '',
+                cs.errorContainer, cs.onErrorContainer),
+          if (isNative)
+            _Chip(l10n.builtIn, cs.primaryContainer, cs.onPrimaryContainer),
+          if (repoName != null)
+            _Chip(repoName!, cs.tertiaryContainer, cs.onTertiaryContainer),
+        ],
+      ),
+      subtitle: Text(
+        '${ext.lang.toUpperCase()} · v${ext.version}',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+      trailing: isNative
+          ? null
+          : OutlinedButton(
+              onPressed: onToggle,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                visualDensity: VisualDensity.compact,
+                foregroundColor: isInstalled ? cs.error : cs.primary,
+                side: BorderSide(color: isInstalled ? cs.error : cs.primary),
+              ),
+              child: Text(isInstalled ? l10n.uninstall : l10n.install),
+            ),
+    );
+  }
+}
+
+class _Icon extends StatelessWidget {
+  const _Icon({required this.name});
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return CircleAvatar(
+      backgroundColor: cs.secondaryContainer,
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        style: TextStyle(
+            color: cs.onSecondaryContainer, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  const _Chip(this.label, this.bg, this.fg);
+  final String label;
+  final Color bg;
+  final Color fg;
+
+  @override
+  Widget build(BuildContext context) {
+    if (label.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(right: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
+      child: Text(label,
+          style:
+              TextStyle(color: fg, fontSize: 10, fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon,
+              size: 48,
+              color: Theme.of(context).colorScheme.outlineVariant),
+          const SizedBox(height: 12),
+          Text(label,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Manage Repos Sheet ────────────────────────────────────────────────────────────
 
 class _ManageReposSheet extends ConsumerStatefulWidget {
   @override
@@ -272,24 +511,25 @@ class _ManageReposSheet extends ConsumerStatefulWidget {
 }
 
 class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
-  final _urlController = TextEditingController();
-  final _nameController = TextEditingController();
+  final _urlCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
   String? _urlError;
   bool _adding = false;
 
   @override
   void dispose() {
-    _urlController.dispose();
-    _nameController.dispose();
+    _urlCtrl.dispose();
+    _nameCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _addRepo() async {
-    final url = _urlController.text.trim();
-    final name = _nameController.text.trim();
+    final url = _urlCtrl.text.trim();
+    final name = _nameCtrl.text.trim();
     final l10n = context.l10n;
 
-    if (url.isEmpty || !url.startsWith('http')) {
+    if (url.isEmpty ||
+        (!url.startsWith('http://') && !url.startsWith('https://'))) {
       setState(() => _urlError = l10n.invalidRepositoryUrl);
       return;
     }
@@ -297,12 +537,41 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
       _urlError = null;
       _adding = true;
     });
-    await ref.read(_repoListProvider.notifier).add(url, name.isEmpty ? url : name);
-    ref.invalidate(extensionListProvider);
-    if (mounted) {
-      setState(() => _adding = false);
-      _urlController.clear();
-      _nameController.clear();
+
+    try {
+      final repo = ref.read(_extensionRepoProvider);
+      // Validate URL first
+      final count = await repo.validateRepoUrl(url);
+      await ref
+          .read(_repoListProvider.notifier)
+          .add(url, name.isEmpty ? _nameFromUrl(url) : name);
+      ref.invalidate(extensionListProvider);
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${l10n.addRepository}: $count ${l10n.extensions}'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _urlError = '${l10n.invalidRepositoryUrl}: $e';
+          _adding = false;
+        });
+      }
+    }
+  }
+
+  String _nameFromUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.host;
+    } catch (_) {
+      return url;
     }
   }
 
@@ -310,47 +579,45 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final repos = ref.watch(_repoListProvider);
+    final cs = Theme.of(context).colorScheme;
 
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Handle ──────────────────────────────────────────────────────
+          // Handle
           Center(
             child: Container(
               margin: const EdgeInsets.only(top: 12, bottom: 8),
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.outlineVariant,
+                color: cs.outlineVariant,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-            child: Text(
-              l10n.manageRepos,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            child: Text(l10n.manageRepos,
+                style: Theme.of(context).textTheme.titleLarge),
           ),
-          // ── Existing repos ───────────────────────────────────────────────
+          // Existing repos
           ...repos.map((repo) => ListTile(
                 leading: CircleAvatar(
                   radius: 16,
                   backgroundColor: repo.isDefault
-                      ? Theme.of(context).colorScheme.primaryContainer
-                      : Theme.of(context).colorScheme.secondaryContainer,
+                      ? cs.primaryContainer
+                      : cs.secondaryContainer,
                   child: Icon(
-                    repo.isDefault ? Icons.star : Icons.extension,
+                    repo.isDefault ? Icons.star_rounded : Icons.extension,
                     size: 16,
                     color: repo.isDefault
-                        ? Theme.of(context).colorScheme.onPrimaryContainer
-                        : Theme.of(context).colorScheme.onSecondaryContainer,
+                        ? cs.onPrimaryContainer
+                        : cs.onSecondaryContainer,
                   ),
                 ),
                 title: Text(repo.name),
@@ -361,18 +628,12 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 trailing: repo.isDefault
-                    ? _Badge(
-                        label: l10n.defaultRepo,
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        textColor:
-                            Theme.of(context).colorScheme.onPrimaryContainer,
-                      )
+                    ? _Chip(l10n.defaultRepo, cs.primaryContainer,
+                        cs.onPrimaryContainer)
                     : TextButton(
                         style: TextButton.styleFrom(
-                          foregroundColor:
-                              Theme.of(context).colorScheme.error,
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 8),
+                          foregroundColor: cs.error,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
                           visualDensity: VisualDensity.compact,
                         ),
                         onPressed: () async {
@@ -385,20 +646,19 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
                       ),
               )),
           const Divider(height: 24),
-          // ── Add new repo form ────────────────────────────────────────────
+          // Add new repo form
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text(
-              l10n.addRepository,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Text(l10n.addRepository,
+                style: Theme.of(context).textTheme.titleMedium),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
-              controller: _nameController,
+              controller: _nameCtrl,
               decoration: InputDecoration(
                 labelText: l10n.repositoryName,
+                hintText: '(${l10n.defaultRepo}: URL host)',
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
@@ -408,12 +668,13 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
-              controller: _urlController,
+              controller: _urlCtrl,
               decoration: InputDecoration(
                 labelText: l10n.repositoryUrl,
                 border: const OutlineInputBorder(),
                 isDense: true,
                 errorText: _urlError,
+                errorMaxLines: 3,
               ),
               keyboardType: TextInputType.url,
               autocorrect: false,
@@ -422,7 +683,7 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
           ),
           const SizedBox(height: 12),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
             child: SizedBox(
               width: double.infinity,
               child: FilledButton(
@@ -438,178 +699,6 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ── Extension List Widget ────────────────────────────────────────────────────────
-
-class _ExtensionList extends StatelessWidget {
-  const _ExtensionList({
-    required this.entries,
-    required this.installed,
-    required this.nativePkgs,
-    required this.onToggle,
-  });
-
-  final List<ExtensionEntry> entries;
-  final Set<String> installed;
-  final Set<String> nativePkgs;
-  final void Function(String pkg) onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    if (entries.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.extension_off,
-                size: 48,
-                color: Theme.of(context).colorScheme.outlineVariant),
-            const SizedBox(height: 12),
-            Text(
-              context.l10n.installed,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
-        ),
-      );
-    }
-    return ListView.builder(
-      itemCount: entries.length,
-      itemBuilder: (context, i) => _ExtensionTile(
-        entry: entries[i],
-        isInstalled:
-            installed.contains(entries[i].extension.pkg) ||
-            entries[i].extension.installed,
-        isNative: nativePkgs.contains(entries[i].extension.pkg),
-        onToggle: () => onToggle(entries[i].extension.pkg),
-      ),
-    );
-  }
-}
-
-// ── Extension Tile Widget ────────────────────────────────────────────────────────
-
-class _ExtensionTile extends StatelessWidget {
-  const _ExtensionTile({
-    required this.entry,
-    required this.isInstalled,
-    required this.isNative,
-    required this.onToggle,
-  });
-
-  final ExtensionEntry entry;
-  final bool isInstalled;
-  final bool isNative;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final ext = entry.extension;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return ListTile(
-      leading: _ExtensionIcon(name: ext.name),
-      title: Row(
-        children: [
-          Flexible(child: Text(ext.name, overflow: TextOverflow.ellipsis)),
-          const SizedBox(width: 6),
-          if (ext.nsfw != 0)
-            _Badge(
-              label: l10n.extensionsNsfw,
-              color: colorScheme.errorContainer,
-              textColor: colorScheme.onErrorContainer,
-            ),
-          if (isNative)
-            _Badge(
-              label: l10n.builtIn,
-              color: colorScheme.primaryContainer,
-              textColor: colorScheme.onPrimaryContainer,
-            ),
-          if (!entry.repo.isDefault && !isNative)
-            _Badge(
-              label: entry.repo.name,
-              color: colorScheme.tertiaryContainer,
-              textColor: colorScheme.onTertiaryContainer,
-            ),
-        ],
-      ),
-      subtitle: Text(
-        '${ext.lang.toUpperCase()} · v${ext.version}',
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-      trailing: isNative
-          ? null
-          : OutlinedButton(
-              onPressed: onToggle,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                visualDensity: VisualDensity.compact,
-                foregroundColor:
-                    isInstalled ? colorScheme.error : colorScheme.primary,
-                side: BorderSide(
-                  color: isInstalled ? colorScheme.error : colorScheme.primary,
-                ),
-              ),
-              child: Text(isInstalled ? l10n.uninstall : l10n.install),
-            ),
-    );
-  }
-}
-
-class _ExtensionIcon extends StatelessWidget {
-  const _ExtensionIcon({required this.name});
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return CircleAvatar(
-      backgroundColor: colorScheme.secondaryContainer,
-      child: Text(
-        name.isNotEmpty ? name[0].toUpperCase() : '?',
-        style: TextStyle(
-          color: colorScheme.onSecondaryContainer,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({
-    required this.label,
-    required this.color,
-    required this.textColor,
-  });
-
-  final String label;
-  final Color color;
-  final Color textColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(right: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-        ),
       ),
     );
   }
