@@ -12,7 +12,6 @@ dependencies:
 
   # State management
   flutter_riverpod: ^2.5.1
-  riverpod_annotation: ^2.3.5
 
   # Navigation
   go_router: ^14.2.0
@@ -25,40 +24,24 @@ dependencies:
 
   # Networking
   dio: ^5.4.3
-  cookie_jar: ^4.0.8
-  dio_cookie_manager: ^3.1.1
 
   # Image loading & caching
   cached_network_image: ^3.3.1
-  extended_image: ^9.2.0
   flutter_cache_manager: ^3.3.1
 
   # DI
   get_it: ^7.7.0
-  injectable: ^2.3.2
 
   # Storage / preferences
   shared_preferences: ^2.2.3
-  flutter_secure_storage: ^9.0.0
 
   # HTML parsing (source scraping)
   html: ^0.15.4
 
-  # Backup / archive
-  archive: ^3.6.1
-
-  # Downloads
-  background_downloader: ^8.5.0
-
   # Model utilities
   freezed_annotation: ^2.4.1
-  json_annotation: ^4.9.0
   collection: ^1.18.0
   intl: ^0.19.0
-  rxdart: ^0.27.7
-
-  # Permissions
-  permission_handler: ^11.3.1
 
   cupertino_icons: ^1.0.8
 
@@ -69,16 +52,7 @@ dev_dependencies:
   # Code generation
   build_runner: ^2.4.11
   drift_dev: ^2.19.1
-  injectable_generator: ^2.4.2
-  riverpod_generator: ^2.4.0
   freezed: ^2.5.2
-  json_serializable: ^6.8.0
-  custom_lint: ^0.6.4
-  riverpod_lint: ^2.3.10
-
-  # Testing
-  mockito: ^5.4.4
-  mocktail: ^1.0.4
 
   flutter_lints: ^4.0.0
 
