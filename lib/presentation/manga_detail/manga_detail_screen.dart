@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/l10n/app_strings.dart';
 import '../../domain/entities/chapter.dart';
 import '../../domain/entities/manga.dart';
 import '../../domain/repositories/chapter_repository.dart';
@@ -118,7 +119,7 @@ class _MangaDetailContent extends StatelessWidget {
                 inLibrary ? Icons.favorite : Icons.favorite_border,
                 color: inLibrary ? Colors.pinkAccent : null,
               ),
-              tooltip: inLibrary ? 'Remove from library' : 'Add to library',
+              tooltip: inLibrary ? context.l10n.removeFromLibrary : context.l10n.addToLibrary,
               onPressed: onToggleLibrary,
             ),
           ],
@@ -130,7 +131,7 @@ class _MangaDetailContent extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Text(
-              'Chapters',
+              context.l10n.chapters,
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
@@ -232,7 +233,7 @@ class _MangaInfoState extends State<_MangaInfo> {
             ),
             TextButton(
               onPressed: () => setState(() => _expanded = !_expanded),
-              child: Text(_expanded ? 'Show less' : 'Show more'),
+              child: Text(_expanded ? context.l10n.showLess : context.l10n.showMore),
             ),
           ],
           if (manga.genres.isNotEmpty) ...[
@@ -259,20 +260,23 @@ class _StatusChip extends StatelessWidget {
   const _StatusChip({required this.status});
   final MangaStatus status;
 
-  static const _labels = {
-    MangaStatus.ongoing: 'Ongoing',
-    MangaStatus.completed: 'Completed',
-    MangaStatus.cancelled: 'Cancelled',
-    MangaStatus.onHiatus: 'Hiatus',
-    MangaStatus.licensed: 'Licensed',
-    MangaStatus.publishingFinished: 'Finished',
-    MangaStatus.unknown: 'Unknown',
-  };
+  String _label(BuildContext context) {
+    final l = context.l10n;
+    return switch (status) {
+      MangaStatus.ongoing => l.statusOngoing,
+      MangaStatus.completed => l.statusCompleted,
+      MangaStatus.cancelled => l.statusCancelled,
+      MangaStatus.onHiatus => l.statusHiatus,
+      MangaStatus.licensed => l.statusLicensed,
+      MangaStatus.publishingFinished => l.statusFinished,
+      MangaStatus.unknown => l.statusUnknown,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
     return Chip(
-      label: Text(_labels[status] ?? 'Unknown'),
+      label: Text(_label(context)),
       visualDensity: VisualDensity.compact,
     );
   }

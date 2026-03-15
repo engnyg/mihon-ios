@@ -4,6 +4,7 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/l10n/app_strings.dart';
 import '../../domain/entities/reading_history.dart';
 import '../../domain/repositories/history_repository.dart';
 import '../router/app_router.dart';
@@ -17,18 +18,19 @@ class HistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final historyAsync = ref.watch(_historyProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('History'),
+        title: Text(l10n.history),
         actions: [
           historyAsync.maybeWhen(
             data: (items) => items.isNotEmpty
                 ? IconButton(
                     icon: const Icon(Icons.delete_sweep_outlined),
-                    tooltip: 'Clear all',
-                    onPressed: () => _confirmClearAll(context),
+                    tooltip: l10n.clearHistory,
+                    onPressed: () => _confirmClearAll(context, l10n),
                   )
                 : const SizedBox.shrink(),
             orElse: () => const SizedBox.shrink(),
@@ -40,14 +42,15 @@ class HistoryScreen extends ConsumerWidget {
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (items) {
           if (items.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.history_outlined, size: 64, color: Colors.grey),
-                  SizedBox(height: 12),
-                  Text('No reading history',
-                      style: TextStyle(color: Colors.grey)),
+                  const Icon(Icons.history_outlined,
+                      size: 64, color: Colors.grey),
+                  const SizedBox(height: 12),
+                  Text(l10n.noReadingHistory,
+                      style: const TextStyle(color: Colors.grey)),
                 ],
               ),
             );
@@ -61,23 +64,23 @@ class HistoryScreen extends ConsumerWidget {
     );
   }
 
-  void _confirmClearAll(BuildContext context) {
+  void _confirmClearAll(BuildContext context, AppStrings l10n) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Clear history?'),
-        content: const Text('This will remove all reading history.'),
+        title: Text(l10n.clearHistoryTitle),
+        content: Text(l10n.clearHistoryMessage),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           TextButton(
             onPressed: () {
               GetIt.I<HistoryRepository>().clearAllHistory();
               Navigator.pop(ctx);
             },
-            child: const Text('Clear'),
+            child: Text(l10n.clear),
           ),
         ],
       ),
@@ -114,8 +117,7 @@ class _HistoryTile extends StatelessWidget {
         children: [
           Text(item.chapter.name,
               maxLines: 1, overflow: TextOverflow.ellipsis),
-          Text(dateStr,
-              style: Theme.of(context).textTheme.bodySmall),
+          Text(dateStr, style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
       isThreeLine: true,

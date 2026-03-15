@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/l10n/app_strings.dart';
 import '../../domain/entities/manga.dart';
 import '../router/app_router.dart';
 import '../common/widgets/manga_grid_item.dart';
@@ -40,14 +41,15 @@ class _SourceCatalogScreenState
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       appBar: AppBar(
         title: _isSearching
             ? TextField(
                 controller: _searchController,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search...',
+                decoration: InputDecoration(
+                  hintText: l10n.search,
                   border: InputBorder.none,
                 ),
                 onSubmitted: (q) {
@@ -75,23 +77,17 @@ class _SourceCatalogScreenState
         ],
         bottom: TabBar(
           controller: _tabController,
-          tabs: const [
-            Tab(text: 'Popular'),
-            Tab(text: 'Latest'),
+          tabs: [
+            Tab(text: l10n.popular),
+            Tab(text: l10n.latest),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
-          _MangaGrid(
-            sourceId: widget.sourceId,
-            mode: CatalogMode.popular,
-          ),
-          _MangaGrid(
-            sourceId: widget.sourceId,
-            mode: CatalogMode.latest,
-          ),
+          _MangaGrid(sourceId: widget.sourceId, mode: CatalogMode.popular),
+          _MangaGrid(sourceId: widget.sourceId, mode: CatalogMode.latest),
         ],
       ),
     );

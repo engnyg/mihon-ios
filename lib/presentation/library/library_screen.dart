@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/l10n/app_strings.dart';
 import '../../domain/entities/manga.dart';
 import '../router/app_router.dart';
 import 'library_providers.dart';
@@ -28,6 +29,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final libraryAsync = ref.watch(libraryProvider);
 
     return Scaffold(
@@ -36,14 +38,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             ? TextField(
                 controller: _searchController,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search library...',
+                decoration: InputDecoration(
+                  hintText: l10n.searchLibrary,
                   border: InputBorder.none,
                 ),
                 onChanged: (q) =>
                     ref.read(librarySearchQueryProvider.notifier).state = q,
               )
-            : const Text('Library'),
+            : Text(l10n.library),
         actions: [
           IconButton(
             icon: Icon(_isSearching ? Icons.close : Icons.search),
@@ -66,10 +68,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (mangas) {
           if (mangas.isEmpty) {
-            return const EmptyStateView(
+            return EmptyStateView(
               icon: Icons.collections_bookmark_outlined,
-              title: 'Your library is empty',
-              subtitle: 'Go to Browse to find manga and add them to your library',
+              title: l10n.emptyLibrary,
+              subtitle: l10n.emptyLibrarySubtitle,
             );
           }
           return _LibraryGrid(mangas: mangas);
@@ -124,6 +126,7 @@ class _FilterSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return SizedBox(
       height: 300,
       child: Column(
@@ -138,10 +141,9 @@ class _FilterSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          const Text('Filter & Sort',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          // TODO: Filter options (read status, downloaded, etc.)
-          const Expanded(child: Center(child: Text('Filters coming soon'))),
+          Text(l10n.filterSort,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Expanded(child: Center(child: Text(l10n.filtersComingSoon))),
         ],
       ),
     );

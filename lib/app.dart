@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/l10n/locale_provider.dart';
 import 'presentation/router/app_router.dart';
 
 class MihonApp extends ConsumerWidget {
@@ -8,6 +10,8 @@ class MihonApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final locale = ref.watch(localeProvider);
+
     return MaterialApp.router(
       title: 'Mihon',
       debugShowCheckedModeBanner: false,
@@ -15,6 +19,14 @@ class MihonApp extends ConsumerWidget {
       darkTheme: _darkTheme(),
       themeMode: ThemeMode.system,
       routerConfig: appRouter,
+      // Localisation
+      locale: locale,
+      supportedLocales: supportedLocales,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
     );
   }
 

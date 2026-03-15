@@ -4,7 +4,11 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:api.github.com)",
       "Bash(ls:*)",
-      "Bash(which gh:*)"
+      "Bash(which gh:*)",
+      "Bash(cd:*)",
+      "Bash(sleep:*)",
+      "Bash(gh run:*)",
+      "Read(//c/Users/666/Desktop/**)"
     ]
   }
 }

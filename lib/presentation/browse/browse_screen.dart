@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/l10n/app_strings.dart';
 import '../../data/sources/source_registry.dart';
 import '../../data/sources/base/manga_source.dart';
 import '../router/app_router.dart';
@@ -10,13 +11,14 @@ class BrowseScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final sources = SourceRegistry.instance.allSources;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Browse')),
+      appBar: AppBar(title: Text(l10n.browse)),
       body: ListView(
         children: [
-          const _SectionHeader(title: 'Sources'),
+          _SectionHeader(title: l10n.sources),
           ...sources.map((source) => _SourceTile(source: source)),
         ],
       ),
