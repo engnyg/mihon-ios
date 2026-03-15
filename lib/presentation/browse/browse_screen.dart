@@ -5,14 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../../core/l10n/app_strings.dart';
 import '../../data/sources/source_registry.dart';
 import '../../data/sources/base/manga_source.dart';
-import '../../data/sources/stub_source.dart';
+import '../../data/sources/tachi_ext/tachi_ext_source.dart';
 import '../router/app_router.dart';
 import 'extensions_screen.dart';
 
 // ── Group key mapping ─────────────────────────────────────────────────────────
 
 /// Sources that share the same extension are grouped under one tile.
-/// Returns the display group name for a source.
 String _groupKey(MangaSource s) {
   switch (s.id) {
     case 'webtoons':
@@ -76,11 +75,13 @@ class _SourcesTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.watch(installedPkgsProvider);
+    // Rebuild when JSON extensions are installed/uninstalled.
+    ref.watch(tachiExtListProvider);
 
     final allSources = SourceRegistry.instance.allSources;
-    final nativeSources = allSources.where((s) => s is! StubSource).toList();
-    final stubSources = allSources.whereType<StubSource>().toList();
+    final nativeSources =
+        allSources.where((s) => s is! TachiExtSource).toList();
+    final jsonSources = allSources.whereType<TachiExtSource>().toList();
 
     final groups = _buildGroups(nativeSources);
     final l10n = context.l10n;
@@ -90,12 +91,12 @@ class _SourcesTab extends ConsumerWidget {
         _SectionHeader(title: l10n.builtIn),
         for (final g in groups)
           if (g.sources.length == 1)
-            _SourceTile(source: g.sources.first, isStub: false)
+            _SourceTile(source: g.sources.first)
           else
             _GroupedTile(group: g),
-        if (stubSources.isNotEmpty) ...[
+        if (jsonSources.isNotEmpty) ...[
           _SectionHeader(title: l10n.installed),
-          ...stubSources.map((s) => _SourceTile(source: s, isStub: true)),
+          ...jsonSources.map((s) => _SourceTile(source: s)),
         ],
       ],
     );
@@ -105,42 +106,27 @@ class _SourcesTab extends ConsumerWidget {
 // ── Single source tile ────────────────────────────────────────────────────────
 
 class _SourceTile extends StatelessWidget {
-  const _SourceTile({required this.source, required this.isStub});
+  const _SourceTile({required this.source});
   final MangaSource source;
-  final bool isStub;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor:
-            isStub ? cs.secondaryContainer : cs.primaryContainer,
+        backgroundColor: cs.primaryContainer,
         child: Text(
           source.name[0].toUpperCase(),
           style: TextStyle(
-            color: isStub ? cs.onSecondaryContainer : cs.onPrimaryContainer,
+            color: cs.onPrimaryContainer,
             fontWeight: FontWeight.bold,
           ),
         ),
       ),
       title: Text(source.name),
       subtitle: Text(source.lang.toUpperCase()),
-      trailing: isStub
-          ? Icon(Icons.warning_amber_rounded,
-              size: 18, color: cs.onSurfaceVariant)
-          : const Icon(Icons.chevron_right),
-      onTap: () {
-        if (isStub) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                '"${source.name}" ${context.l10n.notNativelySupported}'),
-            behavior: SnackBarBehavior.floating,
-          ));
-        } else {
-          context.push('${Routes.browse}/source/${source.id}');
-        }
-      },
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => context.push('${Routes.browse}/source/${source.id}'),
     );
   }
 }
@@ -196,7 +182,6 @@ class _SourcePickerSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
           Container(
             margin: const EdgeInsets.only(top: 12, bottom: 8),
             width: 40,
