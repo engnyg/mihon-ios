@@ -4,6 +4,8 @@ import 'package:html/parser.dart' as html_parser;
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/error/exceptions.dart';
+import '../../../domain/entities/page.dart';
+import 'filter.dart';
 import 'manga_source.dart';
 
 /// Base class for HTTP-based manga sources.
@@ -28,6 +30,23 @@ abstract class HttpSource implements MangaSource {
     );
     return dio;
   }
+
+  // ── MangaSource default implementations ──────────────────────────────────
+  // When using `implements`, default bodies in the interface are NOT inherited.
+  // Provide them here so concrete subclasses don't need to repeat them.
+
+  @override
+  bool get supportsLatest => true;
+
+  @override
+  Future<String> getImageUrl(MangaPage page) async {
+    if (page.imageUrl != null) return page.imageUrl!;
+    if (page.url != null) return page.url!;
+    throw ArgumentError('Page has neither imageUrl nor url');
+  }
+
+  @override
+  FilterList getFilterList() => FilterList([]);
 
   // ── Convenience helpers ────────────────────────────────────────────────────
 
