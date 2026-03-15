@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/l10n/app_strings.dart';
+import '../../data/extensions/default_extensions.dart';
 import '../../data/extensions/tachi_ext_repository.dart';
 import '../../data/sources/source_registry.dart';
 import '../../data/sources/tachi_ext/tachi_ext_source.dart';
@@ -29,6 +30,13 @@ class _TachiExtNotifier extends StateNotifier<List<TachiExtDef>> {
   Future<void> _load() async {
     final defs = await _repo.getInstalled();
     if (mounted) state = defs;
+    // Register bundled default extensions first (installed version takes precedence)
+    for (final def in kDefaultExtensions) {
+      if (!SourceRegistry.instance.hasSource(def.id)) {
+        SourceRegistry.instance.registerSource(TachiExtSource(def));
+      }
+    }
+    // Register user-installed extensions (overrides defaults with same id)
     for (final def in defs) {
       SourceRegistry.instance.registerSource(TachiExtSource(def));
     }
