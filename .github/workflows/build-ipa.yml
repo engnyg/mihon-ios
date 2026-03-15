@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    runs-on: macos-13   # Xcode 15 — --no-codesign works reliably
 
     steps:
       - name: Checkout code
@@ -45,18 +45,22 @@ jobs:
       - name: Disable code signing in Xcode project
         run: |
           python3 - <<'EOF'
-          import re, sys
+          import re
           path = 'ios/Runner.xcodeproj/project.pbxproj'
           content = open(path).read()
-          # Strip any auto-assigned team
-          content = re.sub(r'\bDEVELOPMENT_TEAM = \w+;', 'DEVELOPMENT_TEAM = "";', content)
-          # Switch to Manual so Xcode does not look up a team
-          content = re.sub(r'\bCODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;', content)
-          # Clear provisioning profile specifier
+          # Handle any value (empty string, word chars, or quoted string)
+          content = re.sub(r'\bDEVELOPMENT_TEAM = [^;]*;', 'DEVELOPMENT_TEAM = "";', content)
+          content = re.sub(r'\bCODE_SIGN_STYLE = \w+;', 'CODE_SIGN_STYLE = Manual;', content)
+          content = re.sub(r'\bCODE_SIGN_IDENTITY = "[^"]*";', 'CODE_SIGN_IDENTITY = "";', content)
           content = re.sub(r'\bPROVISIONING_PROFILE_SPECIFIER = "[^"]*";',
                            'PROVISIONING_PROFILE_SPECIFIER = "";', content)
           open(path, 'w').write(content)
           print('Patched project.pbxproj — code signing disabled')
+          # Show relevant lines for debugging
+          for line in content.splitlines():
+              kw = ('CODE_SIGN', 'DEVELOPMENT_TEAM', 'PROVISIONING')
+              if any(k in line for k in kw):
+                  print(' ', line.strip())
           EOF
 
       - name: Install CocoaPods
@@ -66,11 +70,46 @@ jobs:
 
       - name: Build iOS app
         run: |
-          flutter build ios --no-codesign --release
+          set +e
+          flutter build ios --no-codesign --release 2>&1
+          FLUTTER_EXIT=$?
+          set -e
+
           if [ -d "build/ios/iphoneos/Runner.app" ]; then
-            echo "✅ Runner.app built successfully"
+            echo "✅ Runner.app built via flutter build"
+            exit 0
+          fi
+
+          echo "flutter build exited $FLUTTER_EXIT — trying xcodebuild directly..."
+
+          # Dart artifacts were compiled by the flutter invocation above.
+          # Call xcodebuild with explicit no-signing flags so the signing
+          # step that caused flutter to fail is bypassed.
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -sdk iphoneos \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            -derivedDataPath "$(pwd)/build/ios/DerivedData" \
+            build
+
+          APP=$(find build/ios/DerivedData -name "Runner.app" -type d | grep "Release-iphoneos" | head -1)
+          if [ -z "$APP" ]; then
+            APP=$(find build/ios/DerivedData -name "Runner.app" -type d | head -1)
+          fi
+
+          if [ -n "$APP" ]; then
+            mkdir -p build/ios/iphoneos
+            cp -r "$APP" build/ios/iphoneos/Runner.app
+            echo "✅ Runner.app built via xcodebuild"
           else
-            echo "❌ Runner.app not found — build truly failed"
+            echo "❌ Runner.app not found anywhere"
             exit 1
           fi
 
