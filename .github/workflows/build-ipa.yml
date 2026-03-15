@@ -47,42 +47,27 @@ jobs:
           cd ios
           pod install --repo-update
 
-      - name: Build Flutter iOS (generate intermediates via flutter)
+      - name: Build iOS app
         run: |
-          # Generate Flutter engine artifacts and app bundle
-          flutter build ios --no-codesign --release 2>&1 || true
-          # xcodebuild succeed even if flutter post-check fails
-          echo "Flutter build step completed (ignoring post-check error)"
-
-      - name: Build with xcodebuild (no signing)
-        run: |
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            | xcpretty || xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM=""
+          # Flutter builds the .app successfully via Xcode.
+          # It only fails at the post-build provisioning check — we ignore that.
+          set +e
+          flutter build ios --no-codesign --release
+          EXIT=$?
+          set -e
+          # Exit 0 = full success, Exit 1 = provisioning check fail (still ok)
+          # Check the .app was actually created
+          if [ -d "build/ios/iphoneos/Runner.app" ]; then
+            echo "✅ Runner.app built successfully"
+          else
+            echo "❌ Runner.app not found — build truly failed"
+            exit $EXIT
+          fi
 
       - name: Package as IPA
         run: |
-          APP_PATH=$(find build/DerivedData -name "Runner.app" -path "*/Release-iphoneos/*" | head -1)
-          echo "Found .app at: $APP_PATH"
           mkdir -p build/ios/ipa/Payload
-          cp -r "$APP_PATH" build/ios/ipa/Payload/
+          cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
           cd build/ios/ipa
           zip -r mihon-ios-unsigned.ipa Payload/
           echo "IPA size: $(du -sh mihon-ios-unsigned.ipa)"
