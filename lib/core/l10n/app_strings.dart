@@ -48,6 +48,13 @@ abstract class AppStrings {
   String get defaultRepo;
   String get customRepo;
 
+  // JSON extensions
+  String get jsonExtensions;
+  String get addJsonExtension;
+  String get jsonExtensionUrl;
+  String get invalidJsonExtension;
+  String get jsonExtInstalled;
+
   // Updates
   String get noUpdatesYet;
 
@@ -157,6 +164,12 @@ class _EnStrings extends AppStrings {
   @override String get defaultRepo => 'Default';
   @override String get customRepo => 'Custom';
 
+  @override String get jsonExtensions => 'JSON Extensions';
+  @override String get addJsonExtension => 'Add JSON Extension';
+  @override String get jsonExtensionUrl => 'Extension URL (.json)';
+  @override String get invalidJsonExtension => 'Invalid JSON extension';
+  @override String get jsonExtInstalled => 'Extension installed';
+
   @override String get noUpdatesYet => 'No updates yet';
 
   @override String get noReadingHistory => 'No reading history';
@@ -242,6 +255,12 @@ class _ZhTwStrings extends AppStrings {
   @override String get invalidRepositoryUrl => '無效的網址';
   @override String get defaultRepo => '預設';
   @override String get customRepo => '自訂';
+
+  @override String get jsonExtensions => 'JSON 擴充';
+  @override String get addJsonExtension => '新增 JSON 擴充';
+  @override String get jsonExtensionUrl => '擴充網址 (.json)';
+  @override String get invalidJsonExtension => '無效的 JSON 擴充';
+  @override String get jsonExtInstalled => '擴充已安裝';
 
   @override String get noUpdatesYet => '暫無更新';
 
