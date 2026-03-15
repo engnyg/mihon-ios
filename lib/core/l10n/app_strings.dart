@@ -33,6 +33,17 @@ abstract class AppStrings {
   String get loadingExtensions;
   String get failedToLoadExtensions;
 
+  // Custom repos
+  String get manageRepos;
+  String get addRepository;
+  String get removeRepository;
+  String get repositoryName;
+  String get repositoryUrl;
+  String get add;
+  String get invalidRepositoryUrl;
+  String get defaultRepo;
+  String get customRepo;
+
   // Updates
   String get noUpdatesYet;
 
@@ -129,6 +140,16 @@ class _EnStrings extends AppStrings {
   @override String get loadingExtensions => 'Loading extensions...';
   @override String get failedToLoadExtensions => 'Failed to load extensions';
 
+  @override String get manageRepos => 'Manage repositories';
+  @override String get addRepository => 'Add repository';
+  @override String get removeRepository => 'Remove';
+  @override String get repositoryName => 'Repository name';
+  @override String get repositoryUrl => 'Repository URL (index.min.json)';
+  @override String get add => 'Add';
+  @override String get invalidRepositoryUrl => 'Invalid URL';
+  @override String get defaultRepo => 'Default';
+  @override String get customRepo => 'Custom';
+
   @override String get noUpdatesYet => 'No updates yet';
 
   @override String get noReadingHistory => 'No reading history';
@@ -202,6 +223,16 @@ class _ZhTwStrings extends AppStrings {
   @override String get extensionsNsfw => '成人內容';
   @override String get loadingExtensions => '載入擴充功能中…';
   @override String get failedToLoadExtensions => '無法載入擴充功能';
+
+  @override String get manageRepos => '管理來源庫';
+  @override String get addRepository => '新增來源庫';
+  @override String get removeRepository => '移除';
+  @override String get repositoryName => '來源庫名稱';
+  @override String get repositoryUrl => '來源庫網址 (index.min.json)';
+  @override String get add => '新增';
+  @override String get invalidRepositoryUrl => '無效的網址';
+  @override String get defaultRepo => '預設';
+  @override String get customRepo => '自訂';
 
   @override String get noUpdatesYet => '暫無更新';
 
