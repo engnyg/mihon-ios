@@ -1,7 +1,11 @@
 import 'base/manga_source.dart';
+import 'built_in/copymanga/copymanga_source.dart';
+import 'built_in/jmcomic/jmcomic_source.dart';
 import 'built_in/mangadex/mangadex_source.dart';
 import 'built_in/mangaplus/mangaplus_source.dart';
+import 'built_in/nhentai/nhentai_source.dart';
 import 'built_in/webtoons/webtoons_source.dart';
+import 'built_in/webtoons/webtoons_zh_source.dart';
 
 /// Central registry of all available manga sources.
 /// Add new sources here.
@@ -10,6 +14,10 @@ class SourceRegistry {
     _register(MangaDexSource());
     _register(MangaPlusSource());
     _register(WebtoonsSource());
+    _register(WebtoonsZhSource());
+    _register(NHentaiSource());
+    _register(CopyMangaSource());
+    _register(JMComicSource());
   }
 
   static final SourceRegistry instance = SourceRegistry._();

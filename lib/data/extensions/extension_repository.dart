@@ -64,7 +64,10 @@ class ExtensionRepository {
     'eu.kanade.tachiyomi.extension.all.mangadex',
     'eu.kanade.tachiyomi.extension.en.mangaplus',
     'eu.kanade.tachiyomi.extension.en.webtoons',
+    'eu.kanade.tachiyomi.extension.all.webtoons',
     'eu.kanade.tachiyomi.extension.all.nhentai',
+    'eu.kanade.tachiyomi.extension.zh.copymanga',
+    'eu.kanade.tachiyomi.extension.zh.jmcomic',
   };
 
   bool isNativelySupported(String pkg) => nativePackages.contains(pkg);
