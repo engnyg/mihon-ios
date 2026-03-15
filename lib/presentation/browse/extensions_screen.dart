@@ -2,25 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/l10n/app_strings.dart';
-import '../../data/extensions/extension.dart';
-import '../../data/extensions/extension_repository.dart';
 import '../../data/extensions/tachi_ext_repository.dart';
 import '../../data/sources/source_registry.dart';
-import '../../data/sources/stub_source.dart';
 import '../../data/sources/tachi_ext/tachi_ext_source.dart';
 import '../../data/sources/tachi_ext/tachi_extension_def.dart';
 
-// ── Providers ───────────────────────────────────────────────────────────────────
-
-final extensionRepoProvider = Provider<ExtensionRepository>(
-  (ref) => ExtensionRepository(),
-);
+// ── Providers ──────────────────────────────────────────────────────────────────
 
 final tachiExtRepoProvider = Provider<TachiExtRepository>(
   (ref) => TachiExtRepository(),
 );
 
-/// Installed Tachimanga JSON extensions.
+/// Installed JSON extension defs — also keeps SourceRegistry in sync.
 final tachiExtListProvider =
     StateNotifierProvider<_TachiExtNotifier, List<TachiExtDef>>(
   (ref) => _TachiExtNotifier(ref.watch(tachiExtRepoProvider)),
@@ -36,10 +29,15 @@ class _TachiExtNotifier extends StateNotifier<List<TachiExtDef>> {
   Future<void> _load() async {
     final defs = await _repo.getInstalled();
     if (mounted) state = defs;
-    // Register all installed JSON sources
     for (final def in defs) {
       SourceRegistry.instance.registerSource(TachiExtSource(def));
     }
+  }
+
+  Future<void> install(TachiExtDef def) async {
+    await _repo.install(def);
+    SourceRegistry.instance.registerSource(TachiExtSource(def));
+    if (mounted) state = [...state.where((d) => d.id != def.id), def];
   }
 
   Future<TachiExtDef> installFromUrl(String url) async {
@@ -59,26 +57,18 @@ class _TachiExtNotifier extends StateNotifier<List<TachiExtDef>> {
   }
 }
 
-/// Extensions grouped by repo. Rebuilds whenever _repoListProvider changes.
-final extensionListProvider =
-    FutureProvider<List<RepoExtensions>>((ref) async {
-  final repo = ref.watch(extensionRepoProvider);
-  ref.watch(_repoListProvider); // invalidate when repos change
-  return repo.fetchGrouped();
-});
-
-/// List of repos (default + custom).
-final _repoListProvider =
-    StateNotifierProvider<_RepoListNotifier, List<ExtensionRepo>>(
-  (ref) => _RepoListNotifier(ref.watch(extensionRepoProvider)),
+/// Tachi repo list — controls which repos appear in Browse.
+final _tachiRepoListProvider =
+    StateNotifierProvider<_TachiRepoListNotifier, List<TachiExtRepo>>(
+  (ref) => _TachiRepoListNotifier(ref.watch(tachiExtRepoProvider)),
 );
 
-class _RepoListNotifier extends StateNotifier<List<ExtensionRepo>> {
-  _RepoListNotifier(this._repo) : super([ExtensionRepository.defaultRepo]) {
+class _TachiRepoListNotifier extends StateNotifier<List<TachiExtRepo>> {
+  _TachiRepoListNotifier(this._repo) : super([]) {
     _load();
   }
 
-  final ExtensionRepository _repo;
+  final TachiExtRepository _repo;
 
   Future<void> _load() async {
     final repos = await _repo.getRepos();
@@ -86,91 +76,25 @@ class _RepoListNotifier extends StateNotifier<List<ExtensionRepo>> {
   }
 
   Future<void> add(String url, String name) async {
-    await _repo.addCustomRepo(url, name);
+    await _repo.addRepo(url, name);
     await _load();
   }
 
   Future<void> remove(String url) async {
-    await _repo.removeCustomRepo(url);
+    await _repo.removeRepo(url);
     await _load();
   }
 }
 
-/// Installed package IDs — also keeps SourceRegistry in sync.
-final installedPkgsProvider =
-    StateNotifierProvider<_InstalledNotifier, Set<String>>(
-  (ref) => _InstalledNotifier(ref.watch(extensionRepoProvider)),
-);
-
-class _InstalledNotifier extends StateNotifier<Set<String>> {
-  _InstalledNotifier(this._repo) : super({}) {
-    _load();
-  }
-
-  final ExtensionRepository _repo;
-
-  Future<void> _load() async {
-    final s = await _repo.getInstalledSet();
-    if (mounted) state = s;
-    // Sync SourceRegistry with all stored extension sources
-    final exts = await _repo.getInstalledExtensions();
-    _syncRegistry(exts, s);
-  }
-
-  Future<void> toggleExt(Extension ext) async {
-    if (state.contains(ext.pkg)) {
-      await _repo.uninstall(ext.pkg);
-      _removeFromRegistry(ext);
-      state = Set.from(state)..remove(ext.pkg);
-    } else {
-      await _repo.installFull(ext);
-      _addToRegistry(ext);
-      state = {...state, ext.pkg};
-    }
-  }
-
-  void _syncRegistry(List<Extension> exts, Set<String> installed) {
-    for (final ext in exts) {
-      if (installed.contains(ext.pkg)) {
-        _addToRegistry(ext);
-      }
-    }
-  }
-
-  void _addToRegistry(Extension ext) {
-    for (final src in ext.sources) {
-      if (!SourceRegistry.instance.hasSource(src.id)) {
-        SourceRegistry.instance.registerSource(StubSource(
-          id: src.id,
-          name: src.name,
-          lang: src.lang,
-          baseUrl: src.baseUrl,
-          extensionName: ext.name,
-        ));
-      }
-    }
-  }
-
-  void _removeFromRegistry(Extension ext) {
-    for (final src in ext.sources) {
-      // Only remove if it's a stub (not a native source)
-      final existing = SourceRegistry.instance.getSource(src.id);
-      if (existing is StubSource) {
-        SourceRegistry.instance.unregisterSource(src.id);
-      }
-    }
-  }
-}
-
-/// Provider that the Sources tab watches to know when to rebuild.
-final sourceRegistryUpdateProvider =
-    StateProvider<int>((ref) {
-  // Rebuild Sources tab whenever installed set changes
-  ref.watch(installedPkgsProvider);
-  return 0;
+/// Extensions grouped by Tachi repo for the Browse tab.
+final _tachiExtBrowseProvider =
+    FutureProvider<List<TachiRepoExtensions>>((ref) async {
+  final repo = ref.watch(tachiExtRepoProvider);
+  ref.watch(_tachiRepoListProvider); // invalidate when repos change
+  return repo.fetchGrouped();
 });
 
-// ── Screen ──────────────────────────────────────────────────────────────────────
+// ── Screen ────────────────────────────────────────────────────────────────────
 
 class ExtensionsScreen extends ConsumerStatefulWidget {
   const ExtensionsScreen({super.key});
@@ -222,8 +146,8 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final listAsync = ref.watch(extensionListProvider);
-    final installed = ref.watch(installedPkgsProvider);
+    final browseAsync = ref.watch(_tachiExtBrowseProvider);
+    final installed = ref.watch(tachiExtListProvider);
 
     return Column(
       children: [
@@ -270,130 +194,98 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
         ),
         const SizedBox(height: 4),
         Expanded(
-          child: listAsync.when(
-            loading: () => Center(child: Text(l10n.loadingExtensions)),
-            error: (e, _) => Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(l10n.failedToLoadExtensions),
-                  const SizedBox(height: 8),
-                  FilledButton.tonal(
-                    onPressed: () => ref.invalidate(extensionListProvider),
-                    child: Text(l10n.retry),
+          child: browseAsync.when(
+            loading: () => _buildContent(context, installed, []),
+            error: (e, _) => Column(
+              children: [
+                _buildContent(context, installed, []),
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(
+                    l10n.failedToLoadExtensions,
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 12),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            data: (groups) => _buildTabs(context, groups, installed),
+            data: (groups) => _buildContent(context, installed, groups),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildTabs(
+  Widget _buildContent(
     BuildContext context,
-    List<RepoExtensions> groups,
-    Set<String> installed,
+    List<TachiExtDef> installed,
+    List<TachiRepoExtensions> browseGroups,
   ) {
-    final jsonExts = ref.watch(tachiExtListProvider);
-    final nativePkgs = ExtensionRepository.nativePackages;
+    final installedIds = installed.map((d) => d.id).toSet();
     final q = _query;
     final selLang = _selectedLang;
 
-    bool matchesQuery(Extension e) {
-      final langOk = selLang.isEmpty ||
-          e.lang.toLowerCase() == selLang ||
-          e.lang.toLowerCase().startsWith(selLang);
+    bool matchesDef(TachiExtDef d) {
+      final langOk =
+          selLang.isEmpty || d.lang.toLowerCase().startsWith(selLang);
       final textOk = q.isEmpty ||
-          e.name.toLowerCase().contains(q) ||
-          e.lang.toLowerCase().contains(q);
+          d.name.toLowerCase().contains(q) ||
+          d.lang.toLowerCase().contains(q);
       return langOk && textOk;
     }
 
-    // Collect all langs for filter chips
+    // ── Language filter chips ──────────────────────────────────────────────
     final allLangs = <String>{};
-    for (final g in groups) {
-      for (final e in g.extensions) {
-        if (!nativePkgs.contains(e.pkg)) allLangs.add(e.lang.toLowerCase());
+    for (final d in installed) {
+      allLangs.add(d.lang.toLowerCase());
+    }
+    for (final g in browseGroups) {
+      for (final d in g.extensions) {
+        allLangs.add(d.lang.toLowerCase());
       }
     }
-    // Prioritize common langs
     const priority = ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'pt'];
     final sortedLangs = [
       ...priority.where(allLangs.contains),
-      ...(allLangs.where((l) => !priority.contains(l) && l != 'all').toList()..sort()),
+      ...(allLangs
+          .where((l) => !priority.contains(l) && l != 'all')
+          .toList()
+        ..sort()),
       if (allLangs.contains('all')) 'all',
     ];
 
-    // ── Installed tab ──────────────────────────────────────────────────────────
-    final nativeItems = nativePkgs
-        .map((pkg) => _ExtItem(
-              ext: Extension(
-                name: _pkgToName(pkg),
-                pkg: pkg,
-                apk: '',
-                lang: _pkgToLang(pkg),
-                code: 0,
-                version: 'built-in',
-              ),
-              repoName: null,
-              isNative: true,
-            ))
-        .where((i) => matchesQuery(i.ext));
-
-    final installedItems = groups
-        .expand((g) => g.extensions
-            .where((e) =>
-                !nativePkgs.contains(e.pkg) &&
-                installed.contains(e.pkg) &&
-                matchesQuery(e))
-            .map((e) => _ExtItem(ext: e, repoName: null, isNative: false)));
-
-    // JSON extension items
-    final jsonItems = jsonExts
-        .where((d) =>
-            (q.isEmpty ||
-                d.name.toLowerCase().contains(q) ||
-                d.lang.toLowerCase().contains(q)) &&
-            (selLang.isEmpty || d.lang.toLowerCase() == selLang))
+    // ── Installed tab ──────────────────────────────────────────────────────
+    final installedList = installed
+        .where(matchesDef)
         .map((d) => _ExtItem(
-              ext: Extension(
-                name: d.name,
-                pkg: d.id,
-                apk: '',
-                lang: d.lang,
-                code: 0,
-                version: 'json',
-                nsfw: d.nsfw ? 1 : 0,
-              ),
-              repoName: 'JSON',
+              id: d.id,
+              name: d.name,
+              lang: d.lang,
+              version: d.version,
+              nsfw: d.nsfw,
+              repoLabel: null,
               isNative: false,
-              isJson: true,
-            ));
+              isInstalled: true,
+            ))
+        .toList();
 
-    final installedList = [...nativeItems, ...installedItems, ...jsonItems];
-
-    // ── Browse tab ─────────────────────────────────────────────────────────────
-    final browseGroups = groups
+    // ── Browse tab ─────────────────────────────────────────────────────────
+    final browseRepoGroups = browseGroups
         .map((g) {
-          final filtered = g.extensions
-              .where((e) => !nativePkgs.contains(e.pkg) && matchesQuery(e))
-              .toList();
-          return _RepoGroup(repo: g.repo, extensions: filtered);
+          final filtered = g.extensions.where(matchesDef).toList();
+          return _TachiRepoGroup(repo: g.repo, extensions: filtered);
         })
         .where((g) => g.extensions.isNotEmpty)
         .toList();
 
-    final onToggle =
-        (Extension ext) => ref.read(installedPkgsProvider.notifier).toggleExt(ext);
-    final onJsonUninstall =
+    final onInstall = (TachiExtDef def) =>
+        ref.read(tachiExtListProvider.notifier).install(def);
+    final onUninstall =
         (String id) => ref.read(tachiExtListProvider.notifier).uninstall(id);
 
     return Column(
       children: [
-        // ── Language filter chips ──────────────────────────────────────────
         if (sortedLangs.isNotEmpty)
           SizedBox(
             height: 38,
@@ -409,8 +301,8 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
                 ...sortedLangs.map((lang) => _LangChip(
                       label: lang.toUpperCase(),
                       selected: selLang == lang,
-                      onTap: () =>
-                          setState(() => _selectedLang = selLang == lang ? '' : lang),
+                      onTap: () => setState(
+                          () => _selectedLang = selLang == lang ? '' : lang),
                     )),
               ],
             ),
@@ -422,14 +314,13 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
             children: [
               _InstalledList(
                 items: installedList,
-                installed: installed,
-                onToggle: onToggle,
-                onJsonUninstall: onJsonUninstall,
+                onUninstall: onUninstall,
               ),
               _BrowseList(
-                groups: browseGroups,
-                installed: installed,
-                onToggle: onToggle,
+                groups: browseRepoGroups,
+                installedIds: installedIds,
+                onInstall: onInstall,
+                onUninstall: onUninstall,
               ),
             ],
           ),
@@ -438,18 +329,9 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
     );
   }
 
-  String _pkgToName(String pkg) {
-    final raw = pkg.split('.').last;
-    return raw[0].toUpperCase() + raw.substring(1);
-  }
-
-  String _pkgToLang(String pkg) {
-    final parts = pkg.split('.');
-    return parts.length >= 6 ? parts[parts.length - 2] : 'en';
-  }
 }
 
-// ── Language chip ─────────────────────────────────────────────────────────────
+// ── Language chip ──────────────────────────────────────────────────────────────
 
 class _LangChip extends StatelessWidget {
   const _LangChip(
@@ -479,41 +361,45 @@ class _LangChip extends StatelessWidget {
   }
 }
 
-// ── Data helpers ──────────────────────────────────────────────────────────────
+// ── Data helpers ───────────────────────────────────────────────────────────────
 
 class _ExtItem {
   const _ExtItem({
-    required this.ext,
-    required this.repoName,
+    required this.id,
+    required this.name,
+    required this.lang,
+    required this.version,
+    required this.nsfw,
+    required this.repoLabel,
     required this.isNative,
-    this.isJson = false,
+    required this.isInstalled,
   });
-  final Extension ext;
-  final String? repoName;
+  final String id;
+  final String name;
+  final String lang;
+  final String version;
+  final bool nsfw;
+  final String? repoLabel;
   final bool isNative;
-  final bool isJson;
+  final bool isInstalled;
 }
 
-class _RepoGroup {
-  const _RepoGroup({required this.repo, required this.extensions});
-  final ExtensionRepo repo;
-  final List<Extension> extensions;
+class _TachiRepoGroup {
+  const _TachiRepoGroup({required this.repo, required this.extensions});
+  final TachiExtRepo repo;
+  final List<TachiExtDef> extensions;
 }
 
-// ── Installed Tab ─────────────────────────────────────────────────────────────
+// ── Installed Tab ──────────────────────────────────────────────────────────────
 
 class _InstalledList extends StatelessWidget {
   const _InstalledList({
     required this.items,
-    required this.installed,
-    required this.onToggle,
-    required this.onJsonUninstall,
+    required this.onUninstall,
   });
 
   final List<_ExtItem> items;
-  final Set<String> installed;
-  final void Function(Extension) onToggle;
-  final void Function(String id) onJsonUninstall;
+  final void Function(String id) onUninstall;
 
   @override
   Widget build(BuildContext context) {
@@ -526,31 +412,34 @@ class _InstalledList extends StatelessWidget {
       itemBuilder: (_, i) {
         final item = items[i];
         return _Tile(
-          ext: item.ext,
-          repoName: item.repoName,
-          isInstalled: item.isJson ||
-              installed.contains(item.ext.pkg) ||
-              item.ext.installed,
+          name: item.name,
+          lang: item.lang,
+          version: item.version,
+          nsfw: item.nsfw,
+          repoLabel: item.repoLabel,
           isNative: item.isNative,
-          isJson: item.isJson,
-          onToggle: item.isJson
-              ? () => onJsonUninstall(item.ext.pkg)
-              : () => onToggle(item.ext),
+          isInstalled: item.isInstalled,
+          onToggle: item.isNative ? null : () => onUninstall(item.id),
         );
       },
     );
   }
 }
 
-// ── Browse Tab (grouped) ──────────────────────────────────────────────────────
+// ── Browse Tab ─────────────────────────────────────────────────────────────────
 
 class _BrowseList extends StatelessWidget {
-  const _BrowseList(
-      {required this.groups, required this.installed, required this.onToggle});
+  const _BrowseList({
+    required this.groups,
+    required this.installedIds,
+    required this.onInstall,
+    required this.onUninstall,
+  });
 
-  final List<_RepoGroup> groups;
-  final Set<String> installed;
-  final void Function(Extension) onToggle;
+  final List<_TachiRepoGroup> groups;
+  final Set<String> installedIds;
+  final void Function(TachiExtDef) onInstall;
+  final void Function(String) onUninstall;
 
   @override
   Widget build(BuildContext context) {
@@ -560,13 +449,19 @@ class _BrowseList extends StatelessWidget {
     final items = <Widget>[];
     for (final group in groups) {
       items.add(_SectionHeader(repo: group.repo, count: group.extensions.length));
-      for (final ext in group.extensions) {
+      for (final def in group.extensions) {
+        final installed = installedIds.contains(def.id);
         items.add(_Tile(
-          ext: ext,
-          repoName: group.repo.isDefault ? null : group.repo.name,
-          isInstalled: installed.contains(ext.pkg) || ext.installed,
-          isNative: ExtensionRepository.nativePackages.contains(ext.pkg),
-          onToggle: () => onToggle(ext),
+          name: def.name,
+          lang: def.lang,
+          version: def.version,
+          nsfw: def.nsfw,
+          repoLabel: group.repo.name,
+          isNative: false,
+          isInstalled: installed,
+          onToggle: installed
+              ? () => onUninstall(def.id)
+              : () => onInstall(def),
         ));
       }
     }
@@ -576,7 +471,7 @@ class _BrowseList extends StatelessWidget {
 
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.repo, required this.count});
-  final ExtensionRepo repo;
+  final TachiExtRepo repo;
   final int count;
 
   @override
@@ -585,16 +480,16 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
       child: Row(
         children: [
-          Icon(
-            repo.isDefault ? Icons.star_rounded : Icons.extension,
-            size: 16,
-            color: Theme.of(context).colorScheme.primary,
-          ),
+          Icon(Icons.extension,
+              size: 16,
+              color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 6),
           Text(
             repo.name,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: Theme.of(context).colorScheme.primary),
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(color: Theme.of(context).colorScheme.primary),
           ),
           const SizedBox(width: 6),
           Text(
@@ -608,24 +503,28 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-// ── Extension Tile ────────────────────────────────────────────────────────────
+// ── Extension Tile ─────────────────────────────────────────────────────────────
 
 class _Tile extends StatelessWidget {
   const _Tile({
-    required this.ext,
-    required this.repoName,
-    required this.isInstalled,
+    required this.name,
+    required this.lang,
+    required this.version,
+    required this.nsfw,
+    required this.repoLabel,
     required this.isNative,
+    required this.isInstalled,
     required this.onToggle,
-    this.isJson = false,
   });
 
-  final Extension ext;
-  final String? repoName;
-  final bool isInstalled;
+  final String name;
+  final String lang;
+  final String version;
+  final bool nsfw;
+  final String? repoLabel;
   final bool isNative;
-  final bool isJson;
-  final VoidCallback onToggle;
+  final bool isInstalled;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -633,23 +532,19 @@ class _Tile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     return ListTile(
-      leading: _Icon(name: ext.name),
+      leading: _Icon(name: name),
       title: Row(
         children: [
-          Flexible(child: Text(ext.name, overflow: TextOverflow.ellipsis)),
+          Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
           const SizedBox(width: 4),
-          if (ext.nsfw != 0)
+          if (nsfw)
             _Chip(l10n.extensionsNsfw, cs.errorContainer, cs.onErrorContainer),
           if (isNative)
             _Chip(l10n.builtIn, cs.primaryContainer, cs.onPrimaryContainer),
-          if (isJson)
-            _Chip('JSON', cs.tertiaryContainer, cs.onTertiaryContainer)
-          else if (repoName != null)
-            _Chip(repoName!, cs.tertiaryContainer, cs.onTertiaryContainer),
         ],
       ),
       subtitle: Text(
-        '${ext.lang.toUpperCase()} · v${ext.version}',
+        '${lang.toUpperCase()} · v$version',
         style: Theme.of(context).textTheme.bodySmall,
       ),
       trailing: isNative
@@ -818,7 +713,7 @@ class _JsonExtSheetState extends ConsumerState<_JsonExtSheet> {
                     ),
                   ),
                   title: Text(d.name),
-                  subtitle: Text(d.lang.toUpperCase()),
+                  subtitle: Text('${d.lang.toUpperCase()} · v${d.version}'),
                   trailing: TextButton(
                     style: TextButton.styleFrom(
                       foregroundColor: cs.error,
@@ -875,7 +770,7 @@ class _JsonExtSheetState extends ConsumerState<_JsonExtSheet> {
   }
 }
 
-// ── Manage Repos Sheet ────────────────────────────────────────────────────────
+// ── Manage Repos Sheet (Tachi JSON repos) ─────────────────────────────────────
 
 class _ManageReposSheet extends ConsumerStatefulWidget {
   @override
@@ -908,13 +803,13 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
       _adding = true;
     });
     try {
-      final repo = ref.read(extensionRepoProvider);
+      final repo = ref.read(tachiExtRepoProvider);
       final count = await repo.validateRepoUrl(url);
-      await ref.read(_repoListProvider.notifier).add(
+      await ref.read(_tachiRepoListProvider.notifier).add(
             url,
             name.isEmpty ? _hostFromUrl(url) : name,
           );
-      ref.invalidate(extensionListProvider);
+      ref.invalidate(_tachiExtBrowseProvider);
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -943,7 +838,7 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final repos = ref.watch(_repoListProvider);
+    final repos = ref.watch(_tachiRepoListProvider);
     final cs = Theme.of(context).colorScheme;
 
     return Padding(
@@ -969,42 +864,40 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
             child: Text(l10n.manageRepos,
                 style: Theme.of(context).textTheme.titleLarge),
           ),
+          if (repos.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(
+                l10n.repositoryUrl,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ),
           ...repos.map((repo) => ListTile(
                 leading: CircleAvatar(
                   radius: 16,
-                  backgroundColor: repo.isDefault
-                      ? cs.primaryContainer
-                      : cs.secondaryContainer,
-                  child: Icon(
-                    repo.isDefault ? Icons.star_rounded : Icons.extension,
-                    size: 16,
-                    color: repo.isDefault
-                        ? cs.onPrimaryContainer
-                        : cs.onSecondaryContainer,
-                  ),
+                  backgroundColor: cs.primaryContainer,
+                  child: Icon(Icons.extension,
+                      size: 16, color: cs.onPrimaryContainer),
                 ),
                 title: Text(repo.name),
                 subtitle: Text(repo.url,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall),
-                trailing: repo.isDefault
-                    ? _Chip(l10n.defaultRepo, cs.primaryContainer,
-                        cs.onPrimaryContainer)
-                    : TextButton(
-                        style: TextButton.styleFrom(
-                            foregroundColor: cs.error,
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 8),
-                            visualDensity: VisualDensity.compact),
-                        onPressed: () async {
-                          await ref
-                              .read(_repoListProvider.notifier)
-                              .remove(repo.url);
-                          ref.invalidate(extensionListProvider);
-                        },
-                        child: Text(l10n.removeRepository),
-                      ),
+                trailing: TextButton(
+                  style: TextButton.styleFrom(
+                      foregroundColor: cs.error,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      visualDensity: VisualDensity.compact),
+                  onPressed: () async {
+                    await ref
+                        .read(_tachiRepoListProvider.notifier)
+                        .remove(repo.url);
+                    ref.invalidate(_tachiExtBrowseProvider);
+                  },
+                  child: Text(l10n.removeRepository),
+                ),
               )),
           const Divider(height: 24),
           Padding(

@@ -12,6 +12,7 @@ class TachiExtDef {
     required this.name,
     required this.lang,
     required this.baseUrl,
+    this.version = '1.0',
     this.nsfw = false,
     this.popularMangaUrl,
     this.latestMangaUrl,
@@ -38,6 +39,7 @@ class TachiExtDef {
   final String name;
   final String lang;
   final String baseUrl;
+  final String version;
   final bool nsfw;
 
   // ── Browse / search URL templates ──────────────────────────────────────────
@@ -92,6 +94,7 @@ class TachiExtDef {
         name: j['name'] as String? ?? '',
         lang: j['lang'] as String? ?? 'en',
         baseUrl: (j['baseUrl'] as String? ?? '').replaceAll(RegExp(r'/$'), ''),
+        version: j['version']?.toString() ?? '1.0',
         nsfw: (j['nsfw'] as bool?) ?? (j['nsfw'] as int?) == 1,
         popularMangaUrl: j['popularMangaUrl'] as String?,
         latestMangaUrl: j['latestMangaUrl'] as String?,
@@ -121,6 +124,7 @@ class TachiExtDef {
         'name': name,
         'lang': lang,
         'baseUrl': baseUrl,
+        'version': version,
         'nsfw': nsfw,
         if (popularMangaUrl != null) 'popularMangaUrl': popularMangaUrl,
         if (latestMangaUrl != null) 'latestMangaUrl': latestMangaUrl,
