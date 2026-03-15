@@ -60,4 +60,11 @@ class StubSource implements MangaSource {
 
   @override
   Future<List<MangaPage>> getPageList(Chapter chapter) async => [];
+
+  @override
+  Future<String> getImageUrl(MangaPage page) async {
+    if (page.imageUrl != null) return page.imageUrl!;
+    if (page.url != null) return page.url!;
+    throw ArgumentError('Page has neither imageUrl nor url');
+  }
 }
