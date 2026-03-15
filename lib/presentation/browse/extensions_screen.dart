@@ -4,25 +4,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/l10n/app_strings.dart';
 import '../../data/extensions/extension.dart';
 import '../../data/extensions/extension_repository.dart';
+import '../../data/sources/source_registry.dart';
+import '../../data/sources/stub_source.dart';
 
 // ── Providers ───────────────────────────────────────────────────────────────────
 
-final _extensionRepoProvider = Provider<ExtensionRepository>(
+final extensionRepoProvider = Provider<ExtensionRepository>(
   (ref) => ExtensionRepository(),
 );
 
 /// Extensions grouped by repo. Rebuilds whenever _repoListProvider changes.
 final extensionListProvider =
     FutureProvider<List<RepoExtensions>>((ref) async {
-  final repo = ref.watch(_extensionRepoProvider);
+  final repo = ref.watch(extensionRepoProvider);
   ref.watch(_repoListProvider); // invalidate when repos change
   return repo.fetchGrouped();
 });
 
-/// List of repos (default + custom). Persisted in SharedPreferences.
+/// List of repos (default + custom).
 final _repoListProvider =
     StateNotifierProvider<_RepoListNotifier, List<ExtensionRepo>>(
-  (ref) => _RepoListNotifier(ref.watch(_extensionRepoProvider)),
+  (ref) => _RepoListNotifier(ref.watch(extensionRepoProvider)),
 );
 
 class _RepoListNotifier extends StateNotifier<List<ExtensionRepo>> {
@@ -48,10 +50,10 @@ class _RepoListNotifier extends StateNotifier<List<ExtensionRepo>> {
   }
 }
 
-/// Installed package IDs.
-final _installedPkgsProvider =
+/// Installed package IDs — also keeps SourceRegistry in sync.
+final installedPkgsProvider =
     StateNotifierProvider<_InstalledNotifier, Set<String>>(
-  (ref) => _InstalledNotifier(ref.watch(_extensionRepoProvider)),
+  (ref) => _InstalledNotifier(ref.watch(extensionRepoProvider)),
 );
 
 class _InstalledNotifier extends StateNotifier<Set<String>> {
@@ -64,18 +66,63 @@ class _InstalledNotifier extends StateNotifier<Set<String>> {
   Future<void> _load() async {
     final s = await _repo.getInstalledSet();
     if (mounted) state = s;
+    // Sync SourceRegistry with all stored extension sources
+    final exts = await _repo.getInstalledExtensions();
+    _syncRegistry(exts, s);
   }
 
-  Future<void> toggle(String pkg) async {
-    if (state.contains(pkg)) {
-      await _repo.uninstall(pkg);
-      state = Set.from(state)..remove(pkg);
+  Future<void> toggleExt(Extension ext) async {
+    if (state.contains(ext.pkg)) {
+      await _repo.uninstall(ext.pkg);
+      _removeFromRegistry(ext);
+      state = Set.from(state)..remove(ext.pkg);
     } else {
-      await _repo.install(pkg);
-      state = {...state, pkg};
+      await _repo.installFull(ext);
+      _addToRegistry(ext);
+      state = {...state, ext.pkg};
+    }
+  }
+
+  void _syncRegistry(List<Extension> exts, Set<String> installed) {
+    for (final ext in exts) {
+      if (installed.contains(ext.pkg)) {
+        _addToRegistry(ext);
+      }
+    }
+  }
+
+  void _addToRegistry(Extension ext) {
+    for (final src in ext.sources) {
+      if (!SourceRegistry.instance.hasSource(src.id)) {
+        SourceRegistry.instance.registerSource(StubSource(
+          id: src.id,
+          name: src.name,
+          lang: src.lang,
+          baseUrl: src.baseUrl,
+          extensionName: ext.name,
+        ));
+      }
+    }
+  }
+
+  void _removeFromRegistry(Extension ext) {
+    for (final src in ext.sources) {
+      // Only remove if it's a stub (not a native source)
+      final existing = SourceRegistry.instance.getSource(src.id);
+      if (existing is StubSource) {
+        SourceRegistry.instance.unregisterSource(src.id);
+      }
     }
   }
 }
+
+/// Provider that the Sources tab watches to know when to rebuild.
+final sourceRegistryUpdateProvider =
+    StateProvider<int>((ref) {
+  // Rebuild Sources tab whenever installed set changes
+  ref.watch(installedPkgsProvider);
+  return 0;
+});
 
 // ── Screen ──────────────────────────────────────────────────────────────────────
 
@@ -90,6 +137,7 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   String _query = '';
+  String _selectedLang = '';
 
   @override
   void initState() {
@@ -118,7 +166,7 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final listAsync = ref.watch(extensionListProvider);
-    final installed = ref.watch(_installedPkgsProvider);
+    final installed = ref.watch(installedPkgsProvider);
 
     return Column(
       children: [
@@ -189,62 +237,115 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
   ) {
     final nativePkgs = ExtensionRepository.nativePackages;
     final q = _query;
+    final selLang = _selectedLang;
 
     bool matchesQuery(Extension e) {
-      if (q.isEmpty) return true;
-      return e.name.toLowerCase().contains(q) ||
+      final langOk = selLang.isEmpty ||
+          e.lang.toLowerCase() == selLang ||
+          e.lang.toLowerCase().startsWith(selLang);
+      final textOk = q.isEmpty ||
+          e.name.toLowerCase().contains(q) ||
           e.lang.toLowerCase().contains(q);
+      return langOk && textOk;
     }
 
-    // ── Installed tab: native built-ins + user-installed entries ──────────────
-    final nativeItems = nativePkgs.map((pkg) => _ExtItem(
-          ext: Extension(
-            name: _pkgToName(pkg),
-            pkg: pkg,
-            apk: '',
-            lang: _pkgToLang(pkg),
-            code: 0,
-            version: 'built-in',
-            installed: true,
-          ),
-          repoName: null,
-          isNative: true,
-        ));
-
-    final installedItems = groups
-        .expand((g) => g.extensions.where((e) =>
-            !nativePkgs.contains(e.pkg) &&
-            installed.contains(e.pkg) &&
-            matchesQuery(e)))
-        .map((e) => _ExtItem(ext: e, repoName: null, isNative: false));
-
-    final installedFiltered = [
-      ...nativeItems.where((i) => matchesQuery(i.ext)),
-      ...installedItems,
+    // Collect all langs for filter chips
+    final allLangs = <String>{};
+    for (final g in groups) {
+      for (final e in g.extensions) {
+        if (!nativePkgs.contains(e.pkg)) allLangs.add(e.lang.toLowerCase());
+      }
+    }
+    // Prioritize common langs
+    const priority = ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'pt'];
+    final sortedLangs = [
+      ...priority.where(allLangs.contains),
+      ...allLangs.where((l) => !priority.contains(l) && l != 'all')..toList()
+        ..sort(),
+      if (allLangs.contains('all')) 'all',
     ];
 
-    // ── Browse tab: all repos, grouped by repo ────────────────────────────────
-    final browseGroups = groups.map((g) {
-      final filtered = g.extensions
-          .where((e) => !nativePkgs.contains(e.pkg) && matchesQuery(e))
-          .toList();
-      return _RepoGroup(repo: g.repo, extensions: filtered);
-    }).where((g) => g.extensions.isNotEmpty).toList();
+    // ── Installed tab ──────────────────────────────────────────────────────────
+    final nativeItems = nativePkgs
+        .map((pkg) => _ExtItem(
+              ext: Extension(
+                name: _pkgToName(pkg),
+                pkg: pkg,
+                apk: '',
+                lang: _pkgToLang(pkg),
+                code: 0,
+                version: 'built-in',
+              ),
+              repoName: null,
+              isNative: true,
+            ))
+        .where((i) => matchesQuery(i.ext));
 
-    return TabBarView(
-      controller: _tabController,
+    final installedItems = groups
+        .expand((g) => g.extensions
+            .where((e) =>
+                !nativePkgs.contains(e.pkg) &&
+                installed.contains(e.pkg) &&
+                matchesQuery(e))
+            .map((e) => _ExtItem(ext: e, repoName: null, isNative: false)));
+
+    final installedList = [...nativeItems, ...installedItems];
+
+    // ── Browse tab ─────────────────────────────────────────────────────────────
+    final browseGroups = groups
+        .map((g) {
+          final filtered = g.extensions
+              .where((e) => !nativePkgs.contains(e.pkg) && matchesQuery(e))
+              .toList();
+          return _RepoGroup(repo: g.repo, extensions: filtered);
+        })
+        .where((g) => g.extensions.isNotEmpty)
+        .toList();
+
+    final onToggle =
+        (Extension ext) => ref.read(installedPkgsProvider.notifier).toggleExt(ext);
+
+    return Column(
       children: [
-        _InstalledList(
-          items: installedFiltered,
-          installed: installed,
-          onToggle: (pkg) =>
-              ref.read(_installedPkgsProvider.notifier).toggle(pkg),
-        ),
-        _BrowseList(
-          groups: browseGroups,
-          installed: installed,
-          onToggle: (pkg) =>
-              ref.read(_installedPkgsProvider.notifier).toggle(pkg),
+        // ── Language filter chips ──────────────────────────────────────────
+        if (sortedLangs.isNotEmpty)
+          SizedBox(
+            height: 38,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              children: [
+                _LangChip(
+                  label: context.l10n.filterAll,
+                  selected: selLang.isEmpty,
+                  onTap: () => setState(() => _selectedLang = ''),
+                ),
+                ...sortedLangs.map((lang) => _LangChip(
+                      label: lang.toUpperCase(),
+                      selected: selLang == lang,
+                      onTap: () =>
+                          setState(() => _selectedLang = selLang == lang ? '' : lang),
+                    )),
+              ],
+            ),
+          ),
+        const SizedBox(height: 2),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _InstalledList(
+                items: installedList,
+                installed: installed,
+                onToggle: onToggle,
+              ),
+              _BrowseList(
+                groups: browseGroups,
+                installed: installed,
+                onToggle: onToggle,
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -261,7 +362,37 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
   }
 }
 
-// ── Data helpers ─────────────────────────────────────────────────────────────────
+// ── Language chip ─────────────────────────────────────────────────────────────
+
+class _LangChip extends StatelessWidget {
+  const _LangChip(
+      {required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: FilterChip(
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        selected: selected,
+        onSelected: (_) => onTap(),
+        visualDensity: VisualDensity.compact,
+        selectedColor: cs.primaryContainer,
+        checkmarkColor: cs.onPrimaryContainer,
+        labelStyle: TextStyle(
+          color: selected ? cs.onPrimaryContainer : null,
+          fontWeight: selected ? FontWeight.w600 : null,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Data helpers ──────────────────────────────────────────────────────────────
 
 class _ExtItem {
   const _ExtItem(
@@ -277,72 +408,64 @@ class _RepoGroup {
   final List<Extension> extensions;
 }
 
-// ── Installed Tab ────────────────────────────────────────────────────────────────
+// ── Installed Tab ─────────────────────────────────────────────────────────────
 
 class _InstalledList extends StatelessWidget {
   const _InstalledList(
-      {required this.items,
-      required this.installed,
-      required this.onToggle});
+      {required this.items, required this.installed, required this.onToggle});
 
   final List<_ExtItem> items;
   final Set<String> installed;
-  final void Function(String) onToggle;
+  final void Function(Extension) onToggle;
 
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) {
-      return _EmptyState(icon: Icons.extension_off, label: context.l10n.installed);
+      return _EmptyState(
+          icon: Icons.extension_off, label: context.l10n.installed);
     }
     return ListView.builder(
       itemCount: items.length,
       itemBuilder: (_, i) => _Tile(
         ext: items[i].ext,
         repoName: items[i].repoName,
-        isInstalled: installed.contains(items[i].ext.pkg) || items[i].ext.installed,
+        isInstalled:
+            installed.contains(items[i].ext.pkg) || items[i].ext.installed,
         isNative: items[i].isNative,
-        onToggle: () => onToggle(items[i].ext.pkg),
+        onToggle: () => onToggle(items[i].ext),
       ),
     );
   }
 }
 
-// ── Browse Tab (grouped) ─────────────────────────────────────────────────────────
+// ── Browse Tab (grouped) ──────────────────────────────────────────────────────
 
 class _BrowseList extends StatelessWidget {
   const _BrowseList(
-      {required this.groups,
-      required this.installed,
-      required this.onToggle});
+      {required this.groups, required this.installed, required this.onToggle});
 
   final List<_RepoGroup> groups;
   final Set<String> installed;
-  final void Function(String) onToggle;
+  final void Function(Extension) onToggle;
 
   @override
   Widget build(BuildContext context) {
     if (groups.isEmpty) {
       return _EmptyState(icon: Icons.cloud_off, label: context.l10n.browse);
     }
-
-    // Build a flat list with section headers
     final items = <Widget>[];
     for (final group in groups) {
-      items.add(_SectionHeader(
-        repo: group.repo,
-        count: group.extensions.length,
-      ));
+      items.add(_SectionHeader(repo: group.repo, count: group.extensions.length));
       for (final ext in group.extensions) {
         items.add(_Tile(
           ext: ext,
           repoName: group.repo.isDefault ? null : group.repo.name,
           isInstalled: installed.contains(ext.pkg) || ext.installed,
           isNative: ExtensionRepository.nativePackages.contains(ext.pkg),
-          onToggle: () => onToggle(ext.pkg),
+          onToggle: () => onToggle(ext),
         ));
       }
     }
-
     return ListView(children: items);
   }
 }
@@ -367,15 +490,13 @@ class _SectionHeader extends StatelessWidget {
           Text(
             repo.name,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.primary,
-                ),
+                color: Theme.of(context).colorScheme.primary),
           ),
           const SizedBox(width: 6),
           Text(
             '($count)',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -383,7 +504,7 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-// ── Extension Tile ───────────────────────────────────────────────────────────────
+// ── Extension Tile ────────────────────────────────────────────────────────────
 
 class _Tile extends StatelessWidget {
   const _Tile({
@@ -412,8 +533,7 @@ class _Tile extends StatelessWidget {
           Flexible(child: Text(ext.name, overflow: TextOverflow.ellipsis)),
           const SizedBox(width: 4),
           if (ext.nsfw != 0)
-            _Chip(ext.nsfw != 0 ? l10n.extensionsNsfw : '',
-                cs.errorContainer, cs.onErrorContainer),
+            _Chip(l10n.extensionsNsfw, cs.errorContainer, cs.onErrorContainer),
           if (isNative)
             _Chip(l10n.builtIn, cs.primaryContainer, cs.onPrimaryContainer),
           if (repoName != null)
@@ -449,11 +569,9 @@ class _Icon extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return CircleAvatar(
       backgroundColor: cs.secondaryContainer,
-      child: Text(
-        name.isNotEmpty ? name[0].toUpperCase() : '?',
-        style: TextStyle(
-            color: cs.onSecondaryContainer, fontWeight: FontWeight.bold),
-      ),
+      child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+          style: TextStyle(
+              color: cs.onSecondaryContainer, fontWeight: FontWeight.bold)),
     );
   }
 }
@@ -466,7 +584,6 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (label.isEmpty) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.only(right: 3),
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -503,7 +620,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ── Manage Repos Sheet ────────────────────────────────────────────────────────────
+// ── Manage Repos Sheet ────────────────────────────────────────────────────────
 
 class _ManageReposSheet extends ConsumerStatefulWidget {
   @override
@@ -527,9 +644,7 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
     final url = _urlCtrl.text.trim();
     final name = _nameCtrl.text.trim();
     final l10n = context.l10n;
-
-    if (url.isEmpty ||
-        (!url.startsWith('http://') && !url.startsWith('https://'))) {
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
       setState(() => _urlError = l10n.invalidRepositoryUrl);
       return;
     }
@@ -537,24 +652,20 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
       _urlError = null;
       _adding = true;
     });
-
     try {
-      final repo = ref.read(_extensionRepoProvider);
-      // Validate URL first
+      final repo = ref.read(extensionRepoProvider);
       final count = await repo.validateRepoUrl(url);
-      await ref
-          .read(_repoListProvider.notifier)
-          .add(url, name.isEmpty ? _nameFromUrl(url) : name);
+      await ref.read(_repoListProvider.notifier).add(
+            url,
+            name.isEmpty ? _hostFromUrl(url) : name,
+          );
       ref.invalidate(extensionListProvider);
-
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${l10n.addRepository}: $count ${l10n.extensions}'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${l10n.addRepository}: $count ${l10n.extensions}'),
+          behavior: SnackBarBehavior.floating,
+        ));
       }
     } catch (e) {
       if (mounted) {
@@ -566,10 +677,9 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
     }
   }
 
-  String _nameFromUrl(String url) {
+  String _hostFromUrl(String url) {
     try {
-      final uri = Uri.parse(url);
-      return uri.host;
+      return Uri.parse(url).host;
     } catch (_) {
       return url;
     }
@@ -588,7 +698,6 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Handle
           Center(
             child: Container(
               margin: const EdgeInsets.only(top: 12, bottom: 8),
@@ -605,7 +714,6 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
             child: Text(l10n.manageRepos,
                 style: Theme.of(context).textTheme.titleLarge),
           ),
-          // Existing repos
           ...repos.map((repo) => ListTile(
                 leading: CircleAvatar(
                   radius: 16,
@@ -621,21 +729,19 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
                   ),
                 ),
                 title: Text(repo.name),
-                subtitle: Text(
-                  repo.url,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                subtitle: Text(repo.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall),
                 trailing: repo.isDefault
                     ? _Chip(l10n.defaultRepo, cs.primaryContainer,
                         cs.onPrimaryContainer)
                     : TextButton(
                         style: TextButton.styleFrom(
-                          foregroundColor: cs.error,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          visualDensity: VisualDensity.compact,
-                        ),
+                            foregroundColor: cs.error,
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8),
+                            visualDensity: VisualDensity.compact),
                         onPressed: () async {
                           await ref
                               .read(_repoListProvider.notifier)
@@ -646,7 +752,6 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
                       ),
               )),
           const Divider(height: 24),
-          // Add new repo form
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
             child: Text(l10n.addRepository,
@@ -658,7 +763,6 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
               controller: _nameCtrl,
               decoration: InputDecoration(
                 labelText: l10n.repositoryName,
-                hintText: '(${l10n.defaultRepo}: URL host)',
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
@@ -692,8 +796,7 @@ class _ManageReposSheetState extends ConsumerState<_ManageReposSheet> {
                     ? const SizedBox(
                         height: 18,
                         width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : Text(l10n.add),
               ),
             ),

@@ -8,7 +8,12 @@
       "Bash(cd:*)",
       "Bash(sleep:*)",
       "Bash(gh run:*)",
-      "Read(//c/Users/666/Desktop/**)"
+      "Read(//c/Users/666/Desktop/**)",
+      "WebFetch(domain:keiyoushi.github.io)",
+      "WebSearch",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

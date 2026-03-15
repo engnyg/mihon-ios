@@ -45,6 +45,7 @@ class ExtensionRepository {
   static const _defaultUrl =
       'https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json';
   static const _installedKey = 'installed_extensions';
+  static const _installedDataKey = 'installed_extensions_data';
   static const _customReposKey = 'custom_extension_repos';
 
   static final defaultRepo = ExtensionRepo(
@@ -166,22 +167,74 @@ class ExtensionRepository {
 
   // ── Install / Uninstall ───────────────────────────────────────────────────────
 
+  /// Install by pkg only (lightweight, no source info).
   Future<void> install(String pkg) async {
     final prefs = await SharedPreferences.getInstance();
     final installed = _loadInstalled(prefs)..add(pkg);
     await prefs.setString(_installedKey, jsonEncode(installed.toList()));
   }
 
+  /// Install and save the full Extension object so sources can be reconstructed.
+  Future<void> installFull(Extension ext) async {
+    final prefs = await SharedPreferences.getInstance();
+    // Update pkg set
+    final installed = _loadInstalled(prefs)..add(ext.pkg);
+    await prefs.setString(_installedKey, jsonEncode(installed.toList()));
+    // Save full data
+    final data = _loadInstalledData(prefs);
+    data[ext.pkg] = _extToMap(ext);
+    await prefs.setString(_installedDataKey, jsonEncode(data));
+  }
+
   Future<void> uninstall(String pkg) async {
     final prefs = await SharedPreferences.getInstance();
     final installed = _loadInstalled(prefs)..remove(pkg);
     await prefs.setString(_installedKey, jsonEncode(installed.toList()));
+    final data = _loadInstalledData(prefs)..remove(pkg);
+    await prefs.setString(_installedDataKey, jsonEncode(data));
   }
 
   Future<Set<String>> getInstalledSet() async {
     final prefs = await SharedPreferences.getInstance();
     return _loadInstalled(prefs);
   }
+
+  /// Returns full Extension objects for all installed extensions.
+  Future<List<Extension>> getInstalledExtensions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = _loadInstalledData(prefs);
+    return data.values
+        .map((e) => Extension.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Map<String, dynamic> _loadInstalledData(SharedPreferences prefs) {
+    final raw = prefs.getString(_installedDataKey);
+    if (raw == null) return {};
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Map<String, dynamic> _extToMap(Extension ext) => {
+        'name': ext.name,
+        'pkg': ext.pkg,
+        'apk': ext.apk,
+        'lang': ext.lang,
+        'code': ext.code,
+        'version': ext.version,
+        'nsfw': ext.nsfw,
+        'sources': ext.sources
+            .map((s) => {
+                  'name': s.name,
+                  'lang': s.lang,
+                  'id': s.id,
+                  'baseUrl': s.baseUrl,
+                })
+            .toList(),
+      };
 
   Set<String> _loadInstalled(SharedPreferences prefs) {
     final raw = prefs.getString(_installedKey);

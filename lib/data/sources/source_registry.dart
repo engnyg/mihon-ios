@@ -18,6 +18,14 @@ class SourceRegistry {
 
   void _register(MangaSource source) => _sources[source.id] = source;
 
+  /// Dynamically register a source (e.g. an installed extension stub).
+  void registerSource(MangaSource source) => _sources[source.id] = source;
+
+  /// Remove a dynamically registered source.
+  void unregisterSource(String id) => _sources.remove(id);
+
+  bool hasSource(String id) => _sources.containsKey(id);
+
   MangaSource? getSource(String id) => _sources[id];
 
   List<MangaSource> get allSources => _sources.values.toList();

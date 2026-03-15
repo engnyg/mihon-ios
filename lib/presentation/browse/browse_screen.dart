@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/l10n/app_strings.dart';
 import '../../data/sources/source_registry.dart';
 import '../../data/sources/base/manga_source.dart';
+import '../../data/sources/stub_source.dart';
 import '../router/app_router.dart';
 import 'extensions_screen.dart';
 
@@ -35,16 +37,32 @@ class BrowseScreen extends StatelessWidget {
   }
 }
 
-class _SourcesTab extends StatelessWidget {
+/// Sources tab — shows native sources + installed extension sources.
+/// Rebuilds whenever the installed extensions set changes.
+class _SourcesTab extends ConsumerWidget {
   const _SourcesTab();
 
   @override
-  Widget build(BuildContext context) {
-    final sources = SourceRegistry.instance.allSources;
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Watch installed pkgs so we rebuild when extensions are installed/uninstalled
+    ref.watch(installedPkgsProvider);
+
+    final allSources = SourceRegistry.instance.allSources;
+    final nativeSources =
+        allSources.where((s) => s is! StubSource).toList();
+    final stubSources =
+        allSources.whereType<StubSource>().toList();
+
+    final l10n = context.l10n;
+
     return ListView(
       children: [
-        _SectionHeader(title: context.l10n.sources),
-        ...sources.map((source) => _SourceTile(source: source)),
+        _SectionHeader(title: l10n.builtIn),
+        ...nativeSources.map((s) => _SourceTile(source: s, isStub: false)),
+        if (stubSources.isNotEmpty) ...[
+          _SectionHeader(title: l10n.installed),
+          ...stubSources.map((s) => _SourceTile(source: s, isStub: true)),
+        ],
       ],
     );
   }
@@ -70,26 +88,43 @@ class _SectionHeader extends StatelessWidget {
 }
 
 class _SourceTile extends StatelessWidget {
-  const _SourceTile({required this.source});
+  const _SourceTile({required this.source, required this.isStub});
   final MangaSource source;
+  final bool isStub;
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+        backgroundColor:
+            isStub ? cs.secondaryContainer : cs.primaryContainer,
         child: Text(
           source.name[0].toUpperCase(),
           style: TextStyle(
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
+            color: isStub ? cs.onSecondaryContainer : cs.onPrimaryContainer,
             fontWeight: FontWeight.bold,
           ),
         ),
       ),
       title: Text(source.name),
       subtitle: Text(source.lang.toUpperCase()),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () => context.push('${Routes.browse}/source/${source.id}'),
+      trailing: isStub
+          ? Icon(Icons.warning_amber_rounded,
+              size: 18, color: cs.onSurfaceVariant)
+          : const Icon(Icons.chevron_right),
+      onTap: () {
+        if (isStub) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+              '"${source.name}" ${context.l10n.notNativelySupported}',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ));
+        } else {
+          context.push('${Routes.browse}/source/${source.id}');
+        }
+      },
     );
   }
 }

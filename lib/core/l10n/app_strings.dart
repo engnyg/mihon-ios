@@ -33,6 +33,10 @@ abstract class AppStrings {
   String get loadingExtensions;
   String get failedToLoadExtensions;
 
+  // Extensions filter
+  String get filterAll;
+  String get notNativelySupported;
+
   // Custom repos
   String get manageRepos;
   String get addRepository;
@@ -140,6 +144,9 @@ class _EnStrings extends AppStrings {
   @override String get loadingExtensions => 'Loading extensions...';
   @override String get failedToLoadExtensions => 'Failed to load extensions';
 
+  @override String get filterAll => 'All';
+  @override String get notNativelySupported =>
+      'is installed but does not have a native iOS implementation yet.';
   @override String get manageRepos => 'Manage repositories';
   @override String get addRepository => 'Add repository';
   @override String get removeRepository => 'Remove';
@@ -224,6 +231,8 @@ class _ZhTwStrings extends AppStrings {
   @override String get loadingExtensions => '載入擴充功能中…';
   @override String get failedToLoadExtensions => '無法載入擴充功能';
 
+  @override String get filterAll => '全部';
+  @override String get notNativelySupported => '已安裝，但尚未有原生 iOS 實作。';
   @override String get manageRepos => '管理來源庫';
   @override String get addRepository => '新增來源庫';
   @override String get removeRepository => '移除';
