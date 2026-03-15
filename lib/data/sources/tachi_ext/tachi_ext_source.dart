@@ -10,6 +10,19 @@ import '../base/filter.dart';
 import '../base/manga_source.dart';
 import 'tachi_extension_def.dart';
 
+/// Thrown when a [TachiExtSource] has no CSS selectors configured.
+/// Keiyoushi APK extensions only provide metadata, not scraping logic.
+class MissingSelectorsException implements Exception {
+  const MissingSelectorsException(this.sourceName);
+  final String sourceName;
+
+  @override
+  String toString() =>
+      '「$sourceName」缺少 CSS 選擇器設定，無法顯示內容。\n'
+      '此擴充來自 APK 格式倉庫（如 Keiyoushi），與本 app 不相容。\n'
+      '請改用提供 CSS 選擇器的 Tachimanga JSON 擴充。';
+}
+
 /// A [MangaSource] driven entirely by a [TachiExtDef] JSON definition.
 ///
 /// CSS selector syntax: `"css.selector@attribute"` extracts an attribute;
@@ -156,8 +169,16 @@ class TachiExtSource implements MangaSource {
 
   // ── MangaSource impl ───────────────────────────────────────────────────────
 
+  /// Whether this source has CSS selectors configured and can fetch content.
+  bool get hasSelectors => def.mangaListSelector.isNotEmpty;
+
+  void _requireSelectors() {
+    if (!hasSelectors) throw MissingSelectorsException(def.name);
+  }
+
   @override
   Future<MangasPage> getPopularManga(int page) async {
+    _requireSelectors();
     if (def.popularMangaUrl == null) {
       return const MangasPage(mangas: [], hasNextPage: false);
     }
@@ -166,6 +187,7 @@ class TachiExtSource implements MangaSource {
 
   @override
   Future<MangasPage> getLatestUpdates(int page) async {
+    _requireSelectors();
     if (def.latestMangaUrl == null) {
       return const MangasPage(mangas: [], hasNextPage: false);
     }
@@ -175,6 +197,7 @@ class TachiExtSource implements MangaSource {
   @override
   Future<MangasPage> searchManga(
       int page, String query, FilterList filters) async {
+    _requireSelectors();
     if (def.searchMangaUrl == null) {
       return const MangasPage(mangas: [], hasNextPage: false);
     }

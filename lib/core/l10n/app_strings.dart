@@ -54,6 +54,7 @@ abstract class AppStrings {
   String get jsonExtensionUrl;
   String get invalidJsonExtension;
   String get jsonExtInstalled;
+  String get notCompatible;
 
   // Updates
   String get noUpdatesYet;
@@ -169,6 +170,7 @@ class _EnStrings extends AppStrings {
   @override String get jsonExtensionUrl => 'Extension URL (.json)';
   @override String get invalidJsonExtension => 'Invalid JSON extension';
   @override String get jsonExtInstalled => 'Extension installed';
+  @override String get notCompatible => 'Not compatible (APK only)';
 
   @override String get noUpdatesYet => 'No updates yet';
 
@@ -261,6 +263,7 @@ class _ZhTwStrings extends AppStrings {
   @override String get jsonExtensionUrl => '擴充網址 (.json)';
   @override String get invalidJsonExtension => '無效的 JSON 擴充';
   @override String get jsonExtInstalled => '擴充已安裝';
+  @override String get notCompatible => '不相容（僅支援 APK）';
 
   @override String get noUpdatesYet => '暫無更新';
 

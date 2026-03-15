@@ -275,6 +275,7 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen>
               repoLabel: null,
               isNative: false,
               isInstalled: true,
+              hasSelectors: d.mangaListSelector.isNotEmpty,
             ))
         .toList();
 
@@ -381,6 +382,7 @@ class _ExtItem {
     required this.repoLabel,
     required this.isNative,
     required this.isInstalled,
+    required this.hasSelectors,
   });
   final String id;
   final String name;
@@ -390,6 +392,8 @@ class _ExtItem {
   final String? repoLabel;
   final bool isNative;
   final bool isInstalled;
+  /// False when the extension has no CSS selectors (e.g. Keiyoushi APK entries).
+  final bool hasSelectors;
 }
 
 class _TachiRepoGroup {
@@ -427,6 +431,7 @@ class _InstalledList extends StatelessWidget {
           repoLabel: item.repoLabel,
           isNative: item.isNative,
           isInstalled: item.isInstalled,
+          hasSelectors: item.hasSelectors,
           onToggle: item.isNative ? null : () => onUninstall(item.id),
         );
       },
@@ -467,6 +472,7 @@ class _BrowseList extends StatelessWidget {
           repoLabel: group.repo.name,
           isNative: false,
           isInstalled: installed,
+          hasSelectors: def.mangaListSelector.isNotEmpty,
           onToggle: installed
               ? () => onUninstall(def.id)
               : () => onInstall(def),
@@ -522,6 +528,7 @@ class _Tile extends StatelessWidget {
     required this.repoLabel,
     required this.isNative,
     required this.isInstalled,
+    required this.hasSelectors,
     required this.onToggle,
   });
 
@@ -532,6 +539,7 @@ class _Tile extends StatelessWidget {
   final String? repoLabel;
   final bool isNative;
   final bool isInstalled;
+  final bool hasSelectors;
   final VoidCallback? onToggle;
 
   @override
@@ -540,7 +548,7 @@ class _Tile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     return ListTile(
-      leading: _Icon(name: name),
+      leading: _Icon(name: name, dimmed: !hasSelectors),
       title: Row(
         children: [
           Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
@@ -549,11 +557,17 @@ class _Tile extends StatelessWidget {
             _Chip(l10n.extensionsNsfw, cs.errorContainer, cs.onErrorContainer),
           if (isNative)
             _Chip(l10n.builtIn, cs.primaryContainer, cs.onPrimaryContainer),
+          if (!hasSelectors)
+            _Chip('APK', cs.surfaceContainerHighest, cs.onSurfaceVariant),
         ],
       ),
       subtitle: Text(
-        '${lang.toUpperCase()} · v$version',
-        style: Theme.of(context).textTheme.bodySmall,
+        !hasSelectors
+            ? '${lang.toUpperCase()} · ${l10n.notCompatible}'
+            : '${lang.toUpperCase()} · v$version',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: !hasSelectors ? cs.onSurfaceVariant : null,
+            ),
       ),
       trailing: isNative
           ? null
@@ -572,17 +586,21 @@ class _Tile extends StatelessWidget {
 }
 
 class _Icon extends StatelessWidget {
-  const _Icon({required this.name});
+  const _Icon({required this.name, this.dimmed = false});
   final String name;
+  final bool dimmed;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return CircleAvatar(
-      backgroundColor: cs.secondaryContainer,
+      backgroundColor: dimmed
+          ? cs.surfaceContainerHighest
+          : cs.secondaryContainer,
       child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
           style: TextStyle(
-              color: cs.onSecondaryContainer, fontWeight: FontWeight.bold)),
+              color: dimmed ? cs.onSurfaceVariant : cs.onSecondaryContainer,
+              fontWeight: FontWeight.bold)),
     );
   }
 }
